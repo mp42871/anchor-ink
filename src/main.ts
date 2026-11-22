@@ -10,6 +10,9 @@ import { choosePaper, describePaper } from './paper';
 import { buildAnnotatedPdf, downloadBytes, shareFile, safeFileName, renderPagePng, makeThumb } from './export';
 import { googleConfigured, pickFromDrive, downloadDriveFile, uploadToDrive, driveAccount, connectDrive, disconnectDrive, preloadGoogle, setupLink, applySetupFromUrl } from './google';
 import { showPenSetup } from './pensetup';
+import { runTour, isTourRunning, type TourStep } from './tour';
+import { showHelp } from './help';
+import { practicePdf } from './practice';
 import { createColorPicker, recentColors, rememberColor } from './colorpicker';
 import { PDFDocument, rgb } from 'pdf-lib';
 import { drawAll } from './annotations';
@@ -138,6 +141,50 @@ if ('launchQueue' in window) {
   });
 }
 
+// ---------------------------------------------------------------- tutorial & help
+
+const WELCOME_KEY = 'anchor-ink-welcome-dismissed';
+const EDITOR_TOUR_KEY = 'anchor-ink-tour-editor';
+const flag = (k: string) => { try { localStorage.setItem(k, '1'); } catch {} };
+const hasFlag = (k: string) => { try { return !!localStorage.getItem(k); } catch { return true; } };
+const showWelcome = () => !hasFlag(WELCOME_KEY);
+
+/** set while the editor is open: runs the toolbar tour */
+let editorTour: (() => void) | null = null;
+let tourOnOpen = false;
+
+async function startTutorial() {
+  flag(WELCOME_KEY);
+  busy('Preparing the practice sheet…');
+  try {
+    const doc = await createDoc({ title: 'Practice sheet', source: 'tutorial', pdf: await practicePdf() });
+    tourOnOpen = true;
+    openEditor(doc);
+  } finally {
+    busy(null);
+  }
+}
+
+function openHelp(topic?: string) {
+  showHelp({
+    tour: () => (editorTour ? editorTour() : startTutorial()),
+    practice: startTutorial,
+    penSetup: () => showPenSetup(),
+  }, topic);
+}
+
+function homeTour() {
+  flag(WELCOME_KEY);
+  runTour([
+    { target: '[data-a=open]', title: 'Open a document', text: 'Open PDFs, Word, PowerPoint and pictures from this board, a USB drive or a shared folder. You can also drag files onto the screen.' },
+    { target: '[data-a=drive]', title: 'Google Drive', text: 'Connect your school Google account once, then open Docs, Slides and Sheets straight from Drive.' },
+    { target: '[data-a=whiteboard]', title: 'Whiteboard and paper', text: 'Start a blank whiteboard, or lined, handwriting, graph or dot paper. You choose the spacing.' },
+    { target: '.recent', title: 'Your library', text: 'Everything you mark up is saved here automatically. Tap a document to carry on where you left off.' },
+    { target: '[data-a=pensetup]', title: 'Pen setup (do this once)', text: 'Teach the board the difference between the pen and your finger. After that, a resting hand never draws and fingers scroll.' },
+    { target: '[data-a=help]', title: 'Help is always here', text: 'Search the help, replay this tour or open the practice sheet any time.' },
+  ], { finishLabel: 'Done' });
+}
+
 // ---------------------------------------------------------------- home
 
 let editorCleanup: (() => Promise<void>) | null = null;
@@ -152,6 +199,7 @@ async function showHome() {
     : acct ? (acct.email || 'Connected') : 'Tap to connect your Drive';
   const tiles: [string, string, string, string][] = [
     ['open', 'file', 'Open a file', 'PDF · Word · PowerPoint · Images'],
+    ['tutorial', 'school', 'Tutorial', 'Learn the basics in 3 minutes'],
     ['drive', 'cloud', acct ? 'Google Drive' : 'Connect Google Drive', driveSub],
     ['whiteboard', 'board', 'Whiteboard', 'Blank 16:9 page'],
     ['lined', 'lined', 'Lined paper', 'Handwriting practice'],
@@ -163,11 +211,22 @@ async function showHome() {
     <header class="home-head">
       <div class="brand"><span class="logo">${icon('pen')}</span><div><h1>Anchor Ink</h1><p>Mark up anything. Your ink stays where you put it.</p></div></div>
       <div class="row">
+        <button class="btn" data-a="help">${icon('help')}<span>Help</span></button>
         <button class="btn" data-a="pensetup">${icon('pen')}<span>Pen setup</span></button>
         <button class="btn" data-a="fullscreen">${icon('fullscreen')}<span>Full screen</span></button>
         <button class="btn" data-a="settings">${icon('settings')}<span>Settings</span></button>
       </div>
     </header>
+    ${showWelcome() ? `<section class="welcome">
+      <span class="welcome-icon">${icon('school')}</span>
+      <div class="welcome-text"><h2>New to Anchor Ink?</h2>
+        <p>Take the hands-on tutorial: a practice sheet plus a short guided tour of the tools. It takes about 3 minutes.</p></div>
+      <div class="row">
+        <button class="btn primary" data-a="tutorial">Start the tutorial</button>
+        <button class="btn" data-a="hometour">Show me around</button>
+        <button class="btn icon-only" data-a="dismiss" title="Hide this">${icon('close')}</button>
+      </div>
+    </section>` : ''}
     <section class="tiles">${tiles.map(([a, ic, t, s]) => `
       <button class="tile ${a === 'open' || (a === 'drive' && acct) ? 'primary' : ''}" data-a="${a}">
         <span class="tile-icon">${icon(ic)}</span><span class="tile-title">${t}</span><span class="tile-sub">${s}</span>
@@ -189,6 +248,10 @@ async function showHome() {
     else if (a === 'drive') openFromDrive();
     else if (a === 'settings') showSettings();
     else if (a === 'pensetup') showPenSetup();
+    else if (a === 'tutorial') startTutorial();
+    else if (a === 'hometour') homeTour();
+    else if (a === 'help') openHelp();
+    else if (a === 'dismiss') { flag(WELCOME_KEY); btn.closest('.welcome')?.remove(); }
     else if (a === 'fullscreen') toggleFullscreen();
     else if (['whiteboard', 'lined', 'graph', 'dots'].includes(a)) {
       const opts = a === 'whiteboard' ? defaultTemplate('whiteboard') : await choosePaper(a as Exclude<Template, 'whiteboard'>);
@@ -368,6 +431,7 @@ function openEditor(doc: OpenedDoc) {
       <button class="title-btn" data-a="rename" title="Rename">${esc(doc.meta.title)} ${icon('edit')}</button>
       <span class="save-state" aria-live="polite">Saved</span>
       <div class="spacer"></div>
+      <button class="btn" data-a="help" title="Help">${icon('help')}<span>Help</span></button>
       <button class="btn" data-a="fullscreen" title="Full screen">${icon('fullscreen')}</button>
       <button class="btn primary" data-a="save">${icon('share')}<span>Save / Share</span></button>
     </header>
@@ -577,12 +641,11 @@ function openEditor(doc: OpenedDoc) {
     applyDockSide();
     updatePageLabel();
     updateZoomLabel();
-    try {
-      if (!settings.penMaxSize && settings.drawWith !== 'all' && !localStorage.getItem('anchor-ink-pen-hint')) {
-        localStorage.setItem('anchor-ink-pen-hint', '1');
-        toast('Write with the pen. Two fingers scroll and zoom. Tip: run “Pen setup” on the home screen so a resting hand never draws.', 7000);
-      }
-    } catch {}
+    // new users: walk through the tools the first time (or when started from the tutorial)
+    if (tourOnOpen || !hasFlag(EDITOR_TOUR_KEY)) {
+      tourOnOpen = false;
+      setTimeout(() => editorTour?.(), 400);
+    }
   }).catch((e) => {
     busy(null);
     console.error(e);
@@ -820,6 +883,7 @@ function openEditor(doc: OpenedDoc) {
     const v = editor.viewer;
     switch (b.dataset.a) {
       case 'home': showHome(); break;
+      case 'help': openHelp(); break;
       case 'save': showSaveMenu(); break;
       case 'fullscreen': toggleFullscreen(); break;
       case 'rename': {
@@ -1009,7 +1073,28 @@ function openEditor(doc: OpenedDoc) {
   flyout.hidden = true;
   window.addEventListener('resize', positionFlyout);
 
+  const toolbarOpen = () => { if (settings.dockMin) setMinimized(false); flyout.hidden = true; };
+  const tourSteps: TourStep[] = [
+    { title: 'Welcome! 👋', text: 'Here is a quick look at the tools. You can try each one while the tour is open. Use <b>Next</b> to continue, or <b>Skip tour</b> to stop.', before: toolbarOpen },
+    { target: '.dock [data-tool=pen]', title: 'Write with the pen', text: 'Just pick up the pen and write. Tap <b>Pen</b> again to change colour and thickness, including any colour you like with the rainbow <b>+</b>.', before: toolbarOpen },
+    { title: 'Move around', text: '<b>Two fingers</b> scroll and pinch-zoom with any tool. Your ink is <b>anchored to the document</b>, so it moves with the page and stays where you put it.<br><br>Tip: run <b>Pen setup</b> on the home screen so a resting hand never draws.' },
+    { target: '.dock [data-tool=highlighter]', title: 'Highlighter', text: 'Highlight words without covering them. Tap it again to pick a colour, width and how see-through it is.', before: toolbarOpen },
+    { target: '.dock [data-tool=eraser]', title: 'Eraser', text: 'Rub out <b>part of a line</b> or <b>whole marks</b>. Its options also have <b>Clear this page</b>.', before: toolbarOpen },
+    { target: '.dock [data-tool=shape]', title: 'Shapes, text, notes & stamps', text: 'Draw lines, arrows, boxes and circles. Below this are <b>Text</b>, <b>Sticky</b> notes and <b>Stamps</b> (✓ ★ 👍): pick one and tap the page.', before: toolbarOpen },
+    { target: '.dock [data-tool=select]', title: 'Select', text: 'Tap a mark (or drag a box around several) to move, resize, copy or delete it.', before: toolbarOpen },
+    { target: '.dock [data-a=undo]', title: 'Undo & redo', text: 'Take back a mistake, or put it back.', before: toolbarOpen },
+    { target: '.dock-head', title: 'Move or shrink the toolbar', text: 'Drag the <b>dots</b> to move the toolbar anywhere, or drop it against either edge to dock it. Tap <b>−</b> to shrink it to one button; tap that button to bring it back.', before: toolbarOpen },
+    { target: '.pagebar', title: 'Pages & zoom', text: 'Go to the previous or next page, see all pages, zoom in and out, or add a blank page.' },
+    { target: '.topbar [data-a=save]', title: 'Saving & sharing', text: 'Your work is saved on this board automatically. <b>Save / Share</b> downloads a PDF, emails it, saves it to Google Drive or prints it.' },
+    { target: '.topbar [data-a=help]', title: 'Need help later?', text: 'Tap <b>Help</b> for answers, to replay this tour, or to open the practice sheet.' },
+  ];
+  editorTour = () => {
+    if (isTourRunning()) return;
+    runTour(tourSteps, { onFinish: () => flag(EDITOR_TOUR_KEY), finishLabel: 'Start writing' });
+  };
+
   editorCleanup = async () => {
+    editorTour = null;
     window.removeEventListener('resize', positionFlyout);
     layoutRo.disconnect();
     editor.finishEditing();
