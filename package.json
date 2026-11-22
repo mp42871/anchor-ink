@@ -1,0 +1,36 @@
+{
+  "name": "anchor-ink",
+  "version": "1.0.0",
+  "description": "Touch-first document annotator for classroom interactive displays",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mp42871/anchor-ink.git"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/mp42871/anchor-ink/issues"
+  },
+  "homepage": "https://github.com/mp42871/anchor-ink#readme",
+  "dependencies": {
+    "docx-preview": "^0.4.1",
+    "jszip": "^3.10.2",
+    "modern-screenshot": "^4.7.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.5.438",
+    "perfect-freehand": "^1.2.3",
+    "pptx-preview": "^1.0.7"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vite-plugin-pwa": "^2.0.0"
+  },
+  "private": true,
+  "type": "module"
+}
