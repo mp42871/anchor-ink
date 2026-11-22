@@ -1,3 +1,4 @@
+import { GOOGLE_CONFIG } from './config';
 import type { ShapeKind, ToolId } from './types';
 
 export interface Settings {
@@ -32,9 +33,9 @@ const defaults: Settings = {
   penMaxSize: 0,
   fingerSize: 0,
   palmErase: false,
-  googleClientId: import.meta.env.VITE_GOOGLE_CLIENT_ID || '',
-  googleApiKey: import.meta.env.VITE_GOOGLE_API_KEY || '',
-  googleAppId: import.meta.env.VITE_GOOGLE_APP_ID || '',
+  googleClientId: import.meta.env.VITE_GOOGLE_CLIENT_ID || GOOGLE_CONFIG.clientId,
+  googleApiKey: import.meta.env.VITE_GOOGLE_API_KEY || GOOGLE_CONFIG.apiKey,
+  googleAppId: import.meta.env.VITE_GOOGLE_APP_ID || GOOGLE_CONFIG.appId,
 };
 
 function load(): Settings {

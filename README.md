@@ -138,6 +138,11 @@ the whole school:
    `GOOGLE_CLIENT_ID`, `GOOGLE_API_KEY` and `GOOGLE_APP_ID`. The Pages workflow passes
    them in, so no board needs setup at all.
 
+The hosted build ships with the school's Client ID, API key and project number in
+`src/config.ts`, so boards need no setup: teachers just tap **Connect Google Drive**.
+To use a different Google project, edit that file, set the repository variables, or
+enter values under *Settings → Google Drive → Administrator setup* on a board.
+
 The app asks only for the `drive.file` permission: it can see just the files a
 teacher picks or saves with it. The Client ID and API key are public identifiers,
 not passwords, which is why sharing them in a setup link is fine. Sign-in only works
