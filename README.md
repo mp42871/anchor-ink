@@ -34,16 +34,36 @@ annotation.
 
 ## Using it on the board
 
-* **One finger or pen** uses the current tool. **Two fingers** scroll and pinch-zoom.
-  In *Settings → Touch* you can choose **Only the pen draws**, so fingers always
-  scroll.
+### Writing with the Clevertouch pen
+* The pen writes as soon as a document opens. No tool needs to be picked first.
+* **Run Pen setup once per board** (home screen → *Pen setup*). Clevertouch's passive
+  pens report to the browser as ordinary touches. The only difference is how big the
+  contact is, so Pen setup has you write with the pen and then draw with a finger, and
+  measures both. After that:
+  * the **pen writes**,
+  * **fingers scroll and pinch-zoom**,
+  * a **hand resting on the board is ignored**, even in the middle of a pen stroke.
+* If the board can't report contact size, Pen setup says so. The pen and fingers then
+  both write, and two fingers scroll.
+* Boards with an active stylus (reported as a real pen) are detected automatically.
+  The pen's eraser end or side button erases.
+* Ink is drawn on a low-latency canvas with pointer prediction so the line keeps up
+  with the pen tip.
+* *Settings → Pen & touch*: **Automatic** (default), **Only the pen writes**, or
+  **Pen and fingers write**.
+
+### Everything else
 * Tap the active tool again to show its colours and sizes.
-* The **⇄** button moves the toolbar to the other side of the screen, for whichever
-  side you're standing on.
-* **Select**: tap a mark to select it, or drag a box around several marks. Then drag
-  to move, use the blue handle to resize, or use the 🗑 / ⧉ buttons. Double-tap text or a
-  sticky note to edit it.
+* **Move** (⇄) swaps the toolbar to the other side, for whichever side you're standing on.
+* **Select**: tap a mark, or drag a box around several. Then drag to move, use the blue
+  handle to resize, or 🗑 / ⧉. Double-tap text or a sticky note to edit it.
 * Keyboard: `Ctrl+Z` / `Ctrl+Y`, `Delete`, `PgUp` / `PgDn`, `Ctrl+scroll` to zoom.
+
+### Split screen and window resizing
+The layout re-fits whenever the window changes size: Android split screen, a snapped
+Windows window, or rotating the panel. Pages re-scale to the new width and keep your
+place, and ink stays on the same words. The toolbar wraps into two columns in short
+windows, and the page bar and top bar compact in narrow ones.
 
 ## Running it
 
@@ -72,27 +92,41 @@ Open the hosted URL in Chrome / Edge on the board and choose **Install app** (or
 *Add to home screen* on Android boards). It then opens full-screen, works
 offline, and registers as a handler for PDF / Word / PowerPoint files.
 
-## Google Drive setup (optional)
+## Google Drive
 
-Without this, teachers can still use Google files: *File → Download → PDF* in
-Google Docs/Slides, then open the download. To open directly from Drive and save
-back to Drive:
+Teachers tap **Connect Google Drive** on the home screen once and sign in with
+their school account. The board remembers them. After that, **Google Drive** opens
+a full-size picker (My Drive, Shared drives, Starred, Recent; several files at once).
+Google Docs, Slides, Sheets and Drawings are exported by Google as PDF, so the
+layout matches exactly. PDFs, Word, PowerPoint and images on Drive work too.
+**Save & share → Save to Google Drive** saves the marked-up PDF back to Drive with
+a shareable link, and re-opening that PDF restores editable ink.
 
-1. In <https://console.cloud.google.com> create (or choose) a project.
+### One-time setup (IT or any teacher, ~10 minutes)
+Google requires every web app to register its own sign-in key. Do this once for
+the whole school:
+
+1. In <https://console.cloud.google.com> (signed in with a school account) create a
+   project called “Anchor Ink”.
 2. **APIs & Services → Library**: enable **Google Drive API** and **Google Picker API**.
-3. **OAuth consent screen**: set it up as *Internal* (Workspace for Education) and add the
-   scope `.../auth/drive.file`.
-4. **Credentials → Create credentials → OAuth client ID** → *Web application*. Add your
-   hosting URL (e.g. `https://yourschool.github.io`) under *Authorised JavaScript origins*.
+3. **OAuth consent screen**: user type **Internal** (Google Workspace for Education). With
+   Internal no Google review is needed.
+4. **Credentials → Create credentials → OAuth client ID → Web application**. Under
+   *Authorised JavaScript origins* add the address the app is hosted at (shown in
+   *Settings → Google Drive → Administrator setup*).
 5. **Credentials → Create credentials → API key** (restrict it to the Picker API and your site).
-6. Put the Client ID, API key and **project number** in Anchor Ink under
-   *Settings → Google Drive*. Or bake them into the build with the environment
-   variables `VITE_GOOGLE_CLIENT_ID`, `VITE_GOOGLE_API_KEY` and `VITE_GOOGLE_APP_ID`
-   (repository *variables* `GOOGLE_CLIENT_ID`, `GOOGLE_API_KEY`, `GOOGLE_APP_ID` for the
-   Pages workflow).
+6. In Anchor Ink: *Settings → Google Drive → Administrator setup*, paste the Client ID,
+   API key and **project number**, then **Copy setup link for other boards**. Opening
+   that link on any board (or emailing it to teachers) configures it in one tap.
+   You can also bake the values into the build with the repository variables
+   `GOOGLE_CLIENT_ID`, `GOOGLE_API_KEY` and `GOOGLE_APP_ID`. The Pages workflow passes
+   them in, so no board needs setup at all.
 
-The app only requests the `drive.file` scope, which means it can see only the
-files a teacher explicitly picks or saves with it.
+The app asks only for the `drive.file` permission: it can see just the files a
+teacher picks or saves with it. The Client ID and API key are public identifiers,
+not passwords, which is why sharing them in a setup link is fine. Sign-in only works
+on an `https://` address (or `localhost`), so host the app (e.g. GitHub Pages)
+rather than opening the files directly.
 
 ## How it works
 
@@ -100,7 +134,8 @@ files a teacher explicitly picks or saves with it.
   viewport at the right resolution for the current zoom, and are released when far away, so
   100+ page documents stay smooth.
 * `src/editor.ts`: pointer and gesture engine and all the tools. It turns pointer input into
-  page-space annotations, and handles two-finger pan/pinch, palm erase and undo history.
+  page-space annotations, and handles two-finger pan/pinch, palm rejection and undo history.
+* `src/input.ts` + `src/pensetup.ts`: classifies each contact as pen, finger or palm, and runs the Pen setup calibration.
 * `src/annotations.ts`: annotation model, rendering (strokes via
   [perfect-freehand](https://github.com/steveruizok/perfect-freehand)) and hit-testing.
 * `src/importers/`: everything becomes a PDF internally. Word is laid out with

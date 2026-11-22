@@ -1,6 +1,6 @@
 /* Anchor Ink — sized for 65–86" classroom touch displays, still usable on a laptop. */
 :root {
-  --b: clamp(46px, min(5.6vmin, calc((100dvh - 200px) / 15)), 104px); /* touch target */
+  --b: clamp(46px, 5.6vmin, 104px); /* touch target; scales with the window (split screen too) */
   --f: clamp(15px, 1.55vmin, 30px); /* base font */
   --r: calc(var(--b) * 0.28);
   --bg: #e8ebf0;
@@ -162,22 +162,23 @@ body.dragging::after {
 }
 .text-editor.note { border: none; color: #1f2328; line-height: 1.25; white-space: pre-wrap; box-shadow: 0 6px 16px rgba(0,0,0,.25), 0 0 0 3px var(--accent); transform: none; }
 
-/* dock */
+/* dock: one tall column, wrapping into more columns when the window is short */
 .dock {
-  position: fixed; top: 50%; transform: translateY(-46%); z-index: 10;
-  display: flex; flex-direction: column; gap: 3px; padding: 6px;
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 10;
+  display: grid; grid-auto-flow: column; grid-auto-columns: var(--b); gap: 3px; padding: 6px;
   background: var(--panel); border-radius: calc(var(--r) * 1.4); box-shadow: var(--shadow);
 }
-.editor[data-dock="left"] .dock, .editor:not([data-dock]) .dock { left: 14px; }
-.editor[data-dock="right"] .dock { right: 14px; }
-.dock hr { width: 70%; border: none; border-top: 1px solid var(--line); margin: 3px auto; }
+.editor[data-dock="left"] .dock, .editor:not([data-dock]) .dock { left: 12px; }
+.editor[data-dock="right"] .dock { right: 12px; }
+.tool.gap::before {
+  content: ""; position: absolute; left: 18%; right: 18%; top: -2px; border-top: 1px solid var(--line);
+}
 .tool {
   position: relative; width: var(--b); height: var(--b); border: none; border-radius: var(--r); background: none;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
 }
 .tool .icon { width: 46%; height: 46%; }
 .tool span { font-size: calc(var(--b) * 0.17); line-height: 1; color: var(--muted); }
-.tool.small { height: calc(var(--b) * 0.6); }
 .tool.active { background: var(--accent); color: #fff; }
 .tool.active span { color: #fff; }
 .tool:not(.active):active { background: var(--accent-soft); }
@@ -189,12 +190,11 @@ body.dragging::after {
 
 /* tool options */
 .flyout {
-  position: fixed; z-index: 11; width: calc(var(--b) * 4.6); padding: calc(var(--b) * 0.2) calc(var(--b) * 0.24);
+  position: fixed; z-index: 11; width: min(calc(var(--b) * 4.6), calc(100vw - 16px)); overflow: auto;
+  padding: calc(var(--b) * 0.2) calc(var(--b) * 0.24);
   background: var(--panel); border-radius: calc(var(--r) * 1.4); box-shadow: var(--shadow);
 }
 .flyout[hidden] { display: none; }
-.editor[data-dock="left"] .flyout, .editor:not([data-dock]) .flyout { left: calc(14px + var(--b) + 12px + 12px); }
-.editor[data-dock="right"] .flyout { right: calc(14px + var(--b) + 12px + 12px); }
 .flyout h4 { margin: 10px 0 8px; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .flyout h4:first-child { margin-top: 0; }
 .swatches, .sizes, .stamps { display: grid; gap: 8px; }
@@ -223,10 +223,16 @@ body.dragging::after {
 
 /* page bar */
 .pagebar {
-  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 9;
+  /* centred in the space beside the toolbar; scrolls sideways if the window is very narrow */
+  --dockspace: calc(var(--dockw, 0px) + 24px);
+  position: absolute; bottom: 12px; z-index: 9; transform: translateX(-50%);
+  left: calc(50% + var(--dockspace) / 2);
+  max-width: calc(100% - var(--dockspace) - 12px); overflow-x: auto; scrollbar-width: none;
   display: flex; align-items: center; gap: 6px; padding: 6px;
   background: var(--panel); border-radius: calc(var(--r) * 1.4); box-shadow: var(--shadow);
 }
+.editor[data-dock="right"] .pagebar { left: calc(50% - var(--dockspace) / 2); }
+.pagebar > * { flex: none; }
 .pagebar .btn { border: none; }
 .pagebar .sep { width: 1px; align-self: stretch; margin: 8px 4px; background: var(--line); }
 .page-label, .zoom-label {
@@ -261,7 +267,7 @@ body.dragging::after {
 .settings h3 small { font-weight: 400; color: var(--muted); }
 .seg { display: flex; gap: 8px; flex-wrap: wrap; }
 .seg button {
-  flex: 1; min-height: calc(var(--b) * 0.9); padding: 8px 16px; border: 2px solid var(--line); border-radius: var(--r);
+  flex: 1 1 calc(var(--b) * 3); text-align: center; min-height: calc(var(--b) * 0.9); padding: 8px 16px; border: 2px solid var(--line); border-radius: var(--r);
   background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center;
 }
 .seg button small { color: var(--muted); font-size: 0.78em; }
@@ -298,6 +304,36 @@ body.dragging::after {
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
-@media (max-width: 700px) {
-  .topbar .btn span, .save-state { display: none; }
+/* narrower windows (split screen): compact the top bar and page bar */
+@media (max-width: 1100px) {
+  .save-state { display: none; }
 }
+@media (max-width: 760px) {
+  .topbar { gap: 6px; padding: 6px 8px; }
+  .topbar .btn span { display: none; }
+  .topbar .btn { padding: 0 calc(var(--b) * 0.18); }
+  .title-btn { flex: 1; max-width: none; }
+  .title-btn .icon { display: none; }
+  .zoom-label { min-width: calc(var(--b) * 1.2); padding: 0 6px; font-size: 0.85em; }
+  .page-label { min-width: calc(var(--b) * 1.2); padding: 0 6px; }
+  .pagebar .sep { margin: 8px 0; }
+}
+@media (max-height: 560px) {
+  .topbar .btn { min-height: calc(var(--b) * 0.62); }
+}
+
+/* pen setup */
+.pad-wrap { position: relative; }
+.pad {
+  display: block; width: 100%; height: min(42vh, calc(var(--b) * 5)); touch-action: none;
+  border: 2px dashed var(--line); border-radius: var(--r);
+  background: #fff repeating-linear-gradient(transparent 0 calc(var(--b) * 0.6 - 1px), #e4eaf4 calc(var(--b) * 0.6 - 1px) calc(var(--b) * 0.6));
+}
+.pad-hint { position: absolute; inset: 0; display: grid; place-items: center; color: #b3bccb; font-size: 1.4em; pointer-events: none; }
+.readout { font-variant-numeric: tabular-nums; min-height: 1.4em; }
+.result { padding: 14px 18px; border-radius: var(--r); margin-top: 8px; }
+.result.good { background: #e7f5ea; color: #1b5e20; }
+.result.warn { background: #fff4e0; color: #7a4a00; }
+.drive-admin, .setup-steps { margin-top: 12px; }
+.drive-admin summary, .setup-steps summary { cursor: pointer; padding: 8px 0; }
+code { background: #f1f3f7; padding: 2px 6px; border-radius: 6px; word-break: break-all; user-select: all; }

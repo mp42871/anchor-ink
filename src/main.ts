@@ -1,80 +1,18 @@
 import './styles.css';
 import { icon } from './icons';
+import { h, esc, toast, busy, modal, confirmBox, promptBox } from './ui';
 import { Editor } from './editor';
 import { settings, saveSettings, toolState } from './settings';
 import type { OpenedDoc, ToolId, ShapeKind, DocMeta } from './types';
 import * as store from './store';
 import { ACCEPT, importFiles, importBlob, templatePdf, addTemplatePage, type ImportResult, type Template } from './importers/index';
 import { buildAnnotatedPdf, downloadBytes, shareFile, safeFileName, renderPagePng, makeThumb } from './export';
-import { googleConfigured, pickFromDrive, downloadDriveFile, uploadToDrive } from './google';
+import { googleConfigured, pickFromDrive, downloadDriveFile, uploadToDrive, driveAccount, connectDrive, disconnectDrive, preloadGoogle, setupLink, applySetupFromUrl } from './google';
+import { showPenSetup } from './pensetup';
 import { PDFDocument, rgb } from 'pdf-lib';
 import { drawAll } from './annotations';
 
 const app = document.getElementById('app')!;
-const h = (html: string) => {
-  const t = document.createElement('template');
-  t.innerHTML = html.trim();
-  return t.content.firstElementChild as HTMLElement;
-};
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-
-// ---------------------------------------------------------------- feedback
-
-let toastTimer = 0;
-function toast(msg: string, ms = 3200) {
-  let t = document.querySelector<HTMLElement>('.toast');
-  if (!t) { t = h('<div class="toast" role="status"></div>'); document.body.appendChild(t); }
-  t.textContent = msg;
-  t.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => t!.classList.remove('show'), ms);
-}
-
-function busy(msg: string | null) {
-  let b = document.querySelector<HTMLElement>('.busy');
-  if (msg === null) { b?.remove(); return; }
-  if (!b) { b = h('<div class="busy"><div class="spinner"></div><div class="busy-msg"></div></div>'); document.body.appendChild(b); }
-  b.querySelector('.busy-msg')!.textContent = msg;
-}
-
-function modal(title: string, body: HTMLElement | string, opts: { wide?: boolean } = {}) {
-  const m = h(`<div class="modal-back"><div class="modal ${opts.wide ? 'wide' : ''}" role="dialog" aria-modal="true">
-    <div class="modal-head"><h2>${esc(title)}</h2><button class="btn icon-only close" title="Close">${icon('close')}</button></div>
-    <div class="modal-body"></div></div></div>`);
-  const bodyEl = m.querySelector('.modal-body')!;
-  if (typeof body === 'string') bodyEl.innerHTML = body; else bodyEl.appendChild(body);
-  const close = () => m.remove();
-  m.querySelector('.close')!.addEventListener('click', close);
-  m.addEventListener('pointerdown', (e) => { if (e.target === m) close(); });
-  document.body.appendChild(m);
-  return { el: m, body: bodyEl as HTMLElement, close };
-}
-
-function confirmBox(text: string, okLabel = 'OK', danger = false): Promise<boolean> {
-  return new Promise((res) => {
-    const body = h(`<div><p class="lead">${esc(text)}</p><div class="row end">
-      <button class="btn" data-a="no">Cancel</button>
-      <button class="btn primary ${danger ? 'danger' : ''}" data-a="yes">${esc(okLabel)}</button></div></div>`);
-    const m = modal('Please confirm', body);
-    body.querySelector('[data-a=no]')!.addEventListener('click', () => { m.close(); res(false); });
-    body.querySelector('[data-a=yes]')!.addEventListener('click', () => { m.close(); res(true); });
-  });
-}
-
-function promptBox(title: string, value: string): Promise<string | null> {
-  return new Promise((res) => {
-    const body = h(`<form><input class="input" type="text" maxlength="120"><div class="row end">
-      <button type="button" class="btn" data-a="no">Cancel</button>
-      <button type="submit" class="btn primary">Save</button></div></form>`);
-    const input = body.querySelector('input')!;
-    input.value = value;
-    const m = modal(title, body);
-    body.querySelector('[data-a=no]')!.addEventListener('click', () => { m.close(); res(null); });
-    body.addEventListener('submit', (e) => { e.preventDefault(); m.close(); res(input.value.trim() || null); });
-    setTimeout(() => { input.focus(); input.select(); }, 50);
-  });
-}
-
 // ---------------------------------------------------------------- importing
 
 const fileInput = h(`<input type="file" multiple accept="${ACCEPT}" hidden>`) as HTMLInputElement;
@@ -124,31 +62,59 @@ async function createDoc(r: ImportResult): Promise<OpenedDoc> {
 async function openFromDrive() {
   if (!googleConfigured()) { showGoogleHelp(); return; }
   try {
+    if (!driveAccount()) {
+      const acct = await connectDrive();
+      toast(`Connected to Google Drive${acct.email ? ' as ' + acct.email : ''}`);
+      if (document.body.dataset.screen === 'home') showHome();
+    }
     const picked = await pickFromDrive();
-    if (!picked) return;
-    busy(`Downloading “${picked.name}” from Google Drive…`);
-    const f = await downloadDriveFile(picked);
-    const r = await importBlob(f.blob, f.name, f.mime, (m) => busy(m));
-    if (picked.mimeType.includes('presentation')) r.source = 'google-slides';
-    else if (picked.mimeType.includes('document')) r.source = 'google-docs';
-    const doc = await createDoc(r);
+    if (!picked.length) return;
+    let last: OpenedDoc | null = null;
+    for (const [i, f] of picked.entries()) {
+      busy(`Downloading “${f.name}” from Google Drive${picked.length > 1 ? ` (${i + 1} of ${picked.length})` : ''}…`);
+      const dl = await downloadDriveFile(f);
+      const r = await importBlob(dl.blob, dl.name, dl.mime, (m) => busy(m));
+      if (f.mimeType.includes('presentation')) r.source = 'google-slides';
+      else if (f.mimeType.includes('document')) r.source = 'google-docs';
+      else if (f.mimeType.includes('spreadsheet')) r.source = 'google-sheets';
+      last = await createDoc(r);
+    }
     busy(null);
-    openEditor(doc);
+    if (picked.length > 1) toast(`${picked.length} documents added to your library`);
+    if (last) openEditor(last);
   } catch (e: any) {
     busy(null);
     modal('Google Drive', `<p class="lead">${esc(e?.message || String(e))}</p>`);
   }
 }
 
+async function connectDriveUi() {
+  try {
+    const acct = await connectDrive();
+    toast(`Connected to Google Drive${acct.email ? ' as ' + acct.email : ''}`);
+    return acct;
+  } catch (e: any) {
+    modal('Google Drive', `<p class="lead">${esc(e?.message || String(e))}</p>`);
+    return null;
+  }
+}
+
 function showGoogleHelp() {
-  modal('Open Google Docs & Slides', `
-    <p class="lead">Google Drive isn't connected on this board yet. You can still open any Google file in two steps:</p>
+  const origin = location.origin;
+  modal('Connect Google Drive', `
+    <p class="lead">Google Drive needs a one-time setup for this site before teachers can press <b>Connect</b>.
+    Google requires every app to register for its own sign-in key. It's free, takes about 10 minutes, and only needs doing once for your whole school.</p>
+    <p><b>If your IT team already did this</b>, ask them for the Anchor Ink setup link and open it on this board. That's all.</p>
+    <details class="setup-steps"><summary><b>I'm setting it up myself</b></summary>
     <ol class="steps">
-      <li>In Google Docs, Slides or Sheets choose <b>File → Download → PDF document</b> (or .docx / .pptx).</li>
-      <li>Here, tap <b>Open a file</b> and pick the download — or drag it onto this window.</li>
-    </ol>
-    <p>To open straight from Drive, an administrator can add a Google Cloud OAuth Client ID and API key in
-    <b>Settings → Google Drive</b> (see the README for the 5-minute setup).</p>`);
+      <li>Go to <b>console.cloud.google.com</b> with your school Google account and create a project called “Anchor Ink”.</li>
+      <li><b>APIs &amp; Services → Library</b>: enable <b>Google Drive API</b> and <b>Google Picker API</b>.</li>
+      <li><b>OAuth consent screen</b>: choose <b>Internal</b>, name it “Anchor Ink”, save.</li>
+      <li><b>Credentials → Create credentials → OAuth client ID → Web application</b>. Under <i>Authorised JavaScript origins</i> add:<br><code class="copyable">${esc(origin)}</code></li>
+      <li><b>Credentials → Create credentials → API key</b>.</li>
+      <li>Paste the Client ID, the API key and your <b>project number</b> (on the project's Dashboard) into <b>Settings → Google Drive</b> here. Then use <b>Copy setup link</b> to set up every other board in one tap.</li>
+    </ol></details>
+    <p class="muted">Until then: in Google Docs or Slides choose <b>File → Download → PDF</b>, then tap <b>Open a file</b> here.</p>`, { wide: true });
 }
 
 window.addEventListener('dragover', (e) => { e.preventDefault(); document.body.classList.add('dragging'); });
@@ -177,9 +143,13 @@ async function showHome() {
   if (editorCleanup) { const c = editorCleanup; editorCleanup = null; await c(); }
   document.body.dataset.screen = 'home';
   const docs = await store.listDocs();
+  const acct = driveAccount();
+  const driveSub = !googleConfigured()
+    ? 'Set up Google Drive'
+    : acct ? (acct.email || 'Connected') : 'Tap to connect your Drive';
   const tiles: [string, string, string, string][] = [
     ['open', 'file', 'Open a file', 'PDF · Word · PowerPoint · Images'],
-    ['drive', 'cloud', 'Google Drive', 'Docs · Slides · Sheets · PDFs'],
+    ['drive', 'cloud', acct ? 'Google Drive' : 'Connect Google Drive', driveSub],
     ['whiteboard', 'board', 'Whiteboard', 'Blank 16:9 page'],
     ['lined', 'lined', 'Lined paper', 'Handwriting practice'],
     ['graph', 'graph', 'Graph paper', 'Maths & plotting'],
@@ -190,12 +160,13 @@ async function showHome() {
     <header class="home-head">
       <div class="brand"><span class="logo">${icon('pen')}</span><div><h1>Anchor Ink</h1><p>Mark up anything. Your ink stays where you put it.</p></div></div>
       <div class="row">
+        <button class="btn" data-a="pensetup">${icon('pen')}<span>Pen setup</span></button>
         <button class="btn" data-a="fullscreen">${icon('fullscreen')}<span>Full screen</span></button>
         <button class="btn" data-a="settings">${icon('settings')}<span>Settings</span></button>
       </div>
     </header>
     <section class="tiles">${tiles.map(([a, ic, t, s]) => `
-      <button class="tile ${a === 'open' ? 'primary' : ''}" data-a="${a}">
+      <button class="tile ${a === 'open' || (a === 'drive' && acct) ? 'primary' : ''}" data-a="${a}">
         <span class="tile-icon">${icon(ic)}</span><span class="tile-title">${t}</span><span class="tile-sub">${s}</span>
       </button>`).join('')}
     </section>
@@ -214,6 +185,7 @@ async function showHome() {
     if (a === 'open') fileInput.click();
     else if (a === 'drive') openFromDrive();
     else if (a === 'settings') showSettings();
+    else if (a === 'pensetup') showPenSetup();
     else if (a === 'fullscreen') toggleFullscreen();
     else if (['whiteboard', 'lined', 'graph', 'dots'].includes(a)) {
       const names: Record<string, string> = { whiteboard: 'Whiteboard', lined: 'Lined paper', graph: 'Graph paper', dots: 'Dot grid' };
@@ -260,17 +232,24 @@ function showSettings() {
     <div class="seg" data-k="dockSide">
       <button data-v="left">Left side</button><button data-v="right">Right side</button>
     </div>
-    <h3>Touch</h3>
+    <h3>Pen &amp; touch</h3>
     <div class="seg" data-k="drawWith">
-      <button data-v="all">Fingers and pens draw<small>two fingers scroll &amp; zoom</small></button>
-      <button data-v="pen">Only the pen draws<small>fingers scroll &amp; zoom</small></button>
+      <button data-v="auto">Automatic<small>pen writes; fingers scroll once the board can tell them apart</small></button>
+      <button data-v="pen">Only the pen writes<small>fingers always scroll &amp; zoom</small></button>
+      <button data-v="all">Pen and fingers write<small>two fingers scroll &amp; zoom</small></button>
     </div>
-    <label class="check"><input type="checkbox" data-k="palmErase"> Wipe with palm or fist to erase (on boards that report touch size)</label>
-    <h3>Google Drive <small>(optional)</small></h3>
-    <p class="muted">Lets teachers open Google Docs / Slides / Sheets directly and save marked-up copies back to Drive. See README → “Google Drive setup”.</p>
-    <label class="field">OAuth Client ID<input class="input" data-k="googleClientId" placeholder="xxxxxxxx.apps.googleusercontent.com"></label>
-    <label class="field">API key<input class="input" data-k="googleApiKey" placeholder="AIza…"></label>
-    <label class="field">Project number (App ID)<input class="input" data-k="googleAppId" placeholder="123456789012"></label>
+    <p class="muted pen-status"></p>
+    <div class="row"><button class="btn" data-a="pensetup">${icon('pen')}<span>Pen setup &amp; test</span></button></div>
+    <label class="check"><input type="checkbox" data-k="palmErase"> Wipe with palm or fist to erase (boards that report touch size)</label>
+    <h3>Google Drive</h3>
+    <div class="drive-status"></div>
+    <details class="drive-admin"><summary>Administrator setup (Client ID / API key)</summary>
+      <p class="muted">Add this site to <i>Authorised JavaScript origins</i>: <code>${esc(location.origin)}</code></p>
+      <label class="field">OAuth Client ID<input class="input" data-k="googleClientId" placeholder="xxxxxxxx.apps.googleusercontent.com"></label>
+      <label class="field">API key<input class="input" data-k="googleApiKey" placeholder="AIza…"></label>
+      <label class="field">Project number (App ID)<input class="input" data-k="googleAppId" placeholder="123456789012"></label>
+      <div class="row"><button class="btn" data-a="copylink">Copy setup link for other boards</button><button class="btn" data-a="drivehelp">Step-by-step guide</button></div>
+    </details>
     <h3>Storage</h3>
     <p class="muted storage-info">Checking…</p>
     <div class="row end"><button class="btn primary" data-a="done">Done</button></div>
@@ -302,6 +281,37 @@ function showSettings() {
     inp.addEventListener('change', () => { settings[k] = inp.value.trim(); saveSettings(); });
   });
   body.querySelector('[data-a=done]')!.addEventListener('click', m.close);
+  const penStatus = () => {
+    body.querySelector('.pen-status')!.textContent = settings.penMaxSize > 0
+      ? 'Pen setup done: this board can tell the pen from a finger.'
+      : 'Tip: run Pen setup so a resting hand never draws and fingers can scroll.';
+  };
+  penStatus();
+  body.querySelector('[data-a=pensetup]')!.addEventListener('click', () => showPenSetup(() => { penStatus(); refresh(); }));
+  const driveStatus = () => {
+    const box = body.querySelector<HTMLElement>('.drive-status')!;
+    const acct = driveAccount();
+    if (!googleConfigured()) {
+      box.innerHTML = '<p class="muted">Not set up on this board yet. Open <b>Administrator setup</b> below, or open the setup link from your IT team.</p>';
+    } else if (acct) {
+      box.innerHTML = `<div class="row"><span class="lead ok">${icon('check')} Connected${acct.email ? ' as <b>' + esc(acct.email) + '</b>' : ''}</span><button class="btn" data-a="disconnect">Disconnect</button></div>`;
+      box.querySelector('[data-a=disconnect]')!.addEventListener('click', () => { disconnectDrive(); driveStatus(); });
+    } else {
+      box.innerHTML = `<div class="row"><button class="btn primary" data-a="connect">${icon('cloud')}<span>Connect Google Drive</span></button></div>`;
+      box.querySelector('[data-a=connect]')!.addEventListener('click', async () => { await connectDriveUi(); driveStatus(); });
+    }
+  };
+  driveStatus();
+  body.querySelectorAll<HTMLInputElement>('input.input').forEach((inp) => inp.addEventListener('change', () => { preloadGoogle(); driveStatus(); }));
+  body.querySelector('[data-a=copylink]')!.addEventListener('click', async () => {
+    if (!googleConfigured()) { toast('Enter the Client ID and API key first.'); return; }
+    const link = setupLink();
+    try { await navigator.clipboard.writeText(link); toast('Setup link copied. Open it on each board (or email it to teachers).'); }
+    catch { modal('Setup link', `<p>Open this link on each board:</p><p><code class="copyable">${esc(link)}</code></p>`); }
+  });
+  body.querySelector('[data-a=drivehelp]')!.addEventListener('click', showGoogleHelp);
+  const onClose = () => { if (document.body.dataset.screen === 'home') showHome(); };
+  body.querySelector('[data-a=done]')!.addEventListener('click', onClose);
   navigator.storage?.estimate?.().then((est) => {
     const mb = (n = 0) => (n / 1024 / 1024).toFixed(0) + ' MB';
     body.querySelector('.storage-info')!.textContent =
@@ -351,17 +361,14 @@ function openEditor(doc: OpenedDoc) {
       <button class="btn" data-a="fullscreen" title="Full screen">${icon('fullscreen')}</button>
       <button class="btn primary" data-a="save">${icon('share')}<span>Save / Share</span></button>
     </header>
-    <div class="stage"></div>
+    <div class="stage">
     <nav class="dock" aria-label="Tools">
       ${TOOLS.map(([id, ic, label]) => `<button class="tool" data-tool="${id}" title="${label}">${icon(ic)}<span>${label}</span><i class="swatch"></i></button>`).join('')}
-      <hr>
-      <button class="tool" data-a="undo" title="Undo">${icon('undo')}<span>Undo</span></button>
+      <button class="tool gap" data-a="undo" title="Undo">${icon('undo')}<span>Undo</span></button>
       <button class="tool" data-a="redo" title="Redo">${icon('redo')}<span>Redo</span></button>
-      <hr>
-      <button class="tool" data-a="save" title="Save / Share">${icon('download')}<span>Save</span></button>
-      <button class="tool small" data-a="swap" title="Move toolbar to other side">${icon('swap')}</button>
+      <button class="tool gap" data-a="save" title="Save / Share">${icon('download')}<span>Save</span></button>
+      <button class="tool" data-a="swap" title="Move toolbar to other side">${icon('swap')}<span>Move</span></button>
     </nav>
-    <div class="flyout" hidden></div>
     <nav class="pagebar" aria-label="Pages">
       <button class="btn icon-only" data-a="pages" title="All pages">${icon('grid')}</button>
       <button class="btn icon-only" data-a="prev" title="Previous page">${icon('up')}</button>
@@ -374,6 +381,8 @@ function openEditor(doc: OpenedDoc) {
       <span class="sep"></span>
       <button class="btn icon-only" data-a="addPage" title="Add a blank page after this one">${icon('pagePlus')}</button>
     </nav>
+    </div>
+    <div class="flyout" hidden></div>
   </div>`);
   app.appendChild(root);
   const $ = <T extends HTMLElement = HTMLElement>(s: string) => root.querySelector<T>(s)!;
@@ -427,11 +436,31 @@ function openEditor(doc: OpenedDoc) {
     $('.zoom-label').textContent = v.zoom === 1 ? (v.fitMode === 'width' ? 'Fit width' : 'Whole page') : Math.round(v.zoom * 100) + '%';
   };
 
+  let lastPad = '';
   applyDockSide = () => {
     root.dataset.dock = settings.dockSide;
-    const dw = dock.getBoundingClientRect().width + 32;
-    editor.viewer.setSidePad(settings.dockSide === 'left' ? dw : 24, settings.dockSide === 'right' ? dw : 24);
+    // wrap the toolbar into extra columns when the window is too short for one
+    const tool = dock.querySelector<HTMLElement>('.tool')!;
+    const th = tool.offsetHeight || 60;
+    const rows = Math.max(3, Math.floor((stage.clientHeight - 32 + 3) / (th + 3)));
+    const want = `repeat(${Math.min(rows, dock.children.length)}, ${th}px)`;
+    if (dock.style.gridTemplateRows !== want) dock.style.gridTemplateRows = want;
+    const dw = Math.round(dock.getBoundingClientRect().width);
+    root.style.setProperty('--dockw', dw + 'px');
+    // keep pages clear of the toolbar; narrow windows get tighter gutters
+    const gutter = stage.clientWidth < 700 ? 8 : 24;
+    const pad = dw + gutter + 14;
+    const key = settings.dockSide + pad + gutter;
+    if (key !== lastPad) {
+      lastPad = key;
+      editor.viewer.setSidePad(settings.dockSide === 'left' ? pad : gutter, settings.dockSide === 'right' ? pad : gutter);
+    }
+    positionFlyout();
   };
+  // split screen / window resizing: toolbar may re-wrap, so re-measure everything
+  const layoutRo = new ResizeObserver(() => applyDockSide());
+  layoutRo.observe(stage);
+  layoutRo.observe(dock);
 
   busy('Opening document…');
   editor.viewer.open(doc.pdf, doc.pages).then(() => {
@@ -440,6 +469,12 @@ function openEditor(doc: OpenedDoc) {
     applyDockSide();
     updatePageLabel();
     updateZoomLabel();
+    try {
+      if (!settings.penMaxSize && settings.drawWith !== 'all' && !localStorage.getItem('anchor-ink-pen-hint')) {
+        localStorage.setItem('anchor-ink-pen-hint', '1');
+        toast('Write with the pen. Two fingers scroll and zoom. Tip: run “Pen setup” on the home screen so a resting hand never draws.', 7000);
+      }
+    } catch {}
   }).catch((e) => {
     busy(null);
     console.error(e);
@@ -575,9 +610,19 @@ function openEditor(doc: OpenedDoc) {
     const active = dock.querySelector<HTMLElement>('.tool.active');
     if (!active || flyout.hidden) return;
     const r = active.getBoundingClientRect();
+    const dr = dock.getBoundingClientRect();
+    const sr = stage.getBoundingClientRect();
+    flyout.style.maxHeight = sr.height - 24 + 'px';
     const fr = flyout.getBoundingClientRect();
-    const top = Math.max(70, Math.min(window.innerHeight - fr.height - 16, r.top + r.height / 2 - fr.height / 2));
+    const top = Math.max(sr.top + 12, Math.min(sr.bottom - fr.height - 12, r.top + r.height / 2 - fr.height / 2));
     flyout.style.top = top + 'px';
+    if (settings.dockSide === 'left') {
+      flyout.style.left = Math.min(dr.right + 12, window.innerWidth - fr.width - 8) + 'px';
+      flyout.style.right = '';
+    } else {
+      flyout.style.left = Math.max(8, dr.left - 12 - fr.width) + 'px';
+      flyout.style.right = '';
+    }
   }
 
   dock.addEventListener('click', (e) => {
@@ -594,7 +639,9 @@ function openEditor(doc: OpenedDoc) {
     }
   });
   // close the options panel when the teacher starts working on the page
-  stage.addEventListener('pointerdown', () => { if (!flyout.hidden) flyout.hidden = true; }, true);
+  stage.addEventListener('pointerdown', (e) => {
+    if (!flyout.hidden && !(e.target as HTMLElement).closest('.dock, .pagebar')) flyout.hidden = true;
+  }, true);
 
   // --- top & page bars
   root.addEventListener('click', async (e) => {
@@ -793,6 +840,7 @@ function openEditor(doc: OpenedDoc) {
 
   editorCleanup = async () => {
     window.removeEventListener('resize', positionFlyout);
+    layoutRo.disconnect();
     editor.finishEditing();
     await persist();
     try {
@@ -811,6 +859,16 @@ function openEditor(doc: OpenedDoc) {
 // ---------------------------------------------------------------- boot
 
 store.requestPersistence();
+function checkSetupLink() {
+  if (!applySetupFromUrl()) return false;
+  saveSettings();
+  preloadGoogle();
+  setTimeout(() => toast('Google Drive is set up on this board. Tap “Connect Google Drive” to sign in.', 6000), 300);
+  return true;
+}
+checkSetupLink();
+window.addEventListener('hashchange', () => { if (checkSetupLink() && document.body.dataset.screen === 'home') showHome(); });
+preloadGoogle();
 showHome();
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

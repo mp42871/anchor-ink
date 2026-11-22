@@ -17,9 +17,9 @@ function strokeOutline(a: StrokeAnn): Path2D {
   for (let i = 0; i < a.pts.length; i += 3) input.push([a.pts[i], a.pts[i + 1], a.pts[i + 2]]);
   const outline = getStroke(input, {
     size: a.size,
-    thinning: a.sim ? 0.45 : 0.6,
+    thinning: a.sim ? 0.2 : 0.6,
     smoothing: 0.5,
-    streamline: 0.4,
+    streamline: 0.25,
     simulatePressure: !!a.sim,
     last: true,
   });

@@ -1,11 +1,17 @@
 import { Viewer } from './viewer';
 import { History } from './history';
 import { settings, toolState } from './settings';
+import { classify, fingerDraws, type Contact } from './input';
 import type { Annotation, NoteAnn, ShapeAnn, StampAnn, StrokeAnn, TextAnn, ToolId } from './types';
 import { bbox, drawAnnotation, hitTest, newId, rectsIntersect, scaled, translated, FONT_STACK } from './annotations';
 
 interface Action {
   started: number;
+  /** filled in by down(): what started it and where */
+  kind?: Contact;
+  sx?: number;
+  sy?: number;
+  travel?: number;
   pointerId: number;
   move(e: PointerEvent): void;
   up(e: PointerEvent): void;
@@ -146,39 +152,79 @@ export class Editor {
   private down(e: PointerEvent) {
     if (this.isUi(e)) return;
     e.preventDefault();
+    const kind = classify(e);
+    const tool = toolState.tool;
+    const inkTool = tool === 'pen' || tool === 'highlighter';
+
+    // A resting hand / palm never draws or scrolls (optionally it erases).
+    if (kind === 'palm') {
+      if (settings.palmErase && inkTool && !this.action && !this.gesture) {
+        this.capture(e);
+        this.action = this.tag(this.eraserAction(e, Math.max(e.width, e.height) / 2), e, kind);
+      }
+      return;
+    }
+
     cancelAnimationFrame(this.momentumRaf);
-    try { this.viewer.scroller.setPointerCapture(e.pointerId); } catch {}
-    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
 
     if (this.editing) {
       // tapping elsewhere finishes typing (and does nothing else)
       this.finishEditing();
-      this.pointers.delete(e.pointerId);
       return;
     }
-    if (this.gesture) { this.addToGesture(e.pointerId); return; }
+
     if (this.action) {
-      // a second finger shortly after the first = the user meant to scroll/zoom
-      if (performance.now() - this.action.started < 450 && e.pointerType !== 'pen') {
-        const first = this.action.pointerId;
-        this.action.cancel();
+      const a = this.action;
+      // While the pen is writing, any other contact is the teacher's hand: ignore it.
+      if (a.kind === 'pen' || kind === 'pen') return;
+      // Two fingers landing together = scroll / zoom, so undo the first finger's mark.
+      if (kind === 'finger' && performance.now() - a.started < 260 && (a.travel ?? 0) < 40) {
+        this.capture(e);
+        const first = a.pointerId;
+        a.cancel();
         this.action = null;
         this.startGesture([first, e.pointerId]);
       }
       return;
     }
-    const tool = toolState.tool;
-    const pan =
-      e.button === 1 || e.button === 2 || tool === 'hand' ||
-      (e.pointerType === 'touch' && settings.drawWith === 'pen');
-    if (pan) { this.startGesture([e.pointerId]); return; }
 
-    const big = Math.max(e.width || 0, e.height || 0);
-    if (settings.palmErase && e.pointerType === 'touch' && big >= 60 && (tool === 'pen' || tool === 'highlighter')) {
-      this.action = this.eraserAction(e, big / 2);
+    if (this.gesture) {
+      if (kind === 'pen') {
+        // pen wins: stop scrolling and write
+        this.gesture = null;
+      } else {
+        this.capture(e);
+        this.addToGesture(e.pointerId);
+        return;
+      }
+    }
+
+    this.capture(e);
+    // Stylus eraser end, or barrel button held → erase.
+    if (e.pointerType === 'pen' && ((e.buttons & 32) || e.button === 5 || e.button === 2)) {
+      this.action = this.tag(this.eraserAction(e, toolState.eraserSize), e, kind);
       return;
     }
-    this.action = this.startTool(tool, e);
+    const pan =
+      (kind === 'mouse' && (e.button === 1 || e.button === 2)) ||
+      tool === 'hand' ||
+      (kind === 'finger' && !fingerDraws());
+    if (pan) { this.startGesture([e.pointerId]); return; }
+    const act = this.startTool(tool, e);
+    this.action = act ? this.tag(act, e, kind) : null;
+  }
+
+  private capture(e: PointerEvent) {
+    try { this.viewer.scroller.setPointerCapture(e.pointerId); } catch {}
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
+  }
+
+  private tag(a: Action, e: PointerEvent, kind: Contact): Action {
+    a.kind = kind;
+    a.sx = e.clientX;
+    a.sy = e.clientY;
+    a.travel = 0;
+    return a;
   }
 
   private move(e: PointerEvent) {
@@ -189,7 +235,11 @@ export class Editor {
     }
     p.x = e.clientX; p.y = e.clientY;
     if (this.gesture?.ids.has(e.pointerId)) this.updateGesture();
-    else if (this.action?.pointerId === e.pointerId) this.action.move(e);
+    else if (this.action?.pointerId === e.pointerId) {
+      const a = this.action;
+      a.travel = Math.max(a.travel ?? 0, Math.hypot(e.clientX - (a.sx ?? 0), e.clientY - (a.sy ?? 0)));
+      a.move(e);
+    }
   }
 
   private up(e: PointerEvent, cancelled = false) {
@@ -311,10 +361,16 @@ export class Editor {
     };
     const live = v.createLiveLayer(page);
     let raf = 0;
+    // points the browser predicts the pen will reach next frame; drawn but never saved
+    let predicted: number[] = [];
     const draw = () => {
       raf = 0;
       live.reset();
-      drawAnnotation(live.ctx, { ...ann, pts: ann.pts.slice() });
+      drawAnnotation(live.ctx, { ...ann, pts: predicted.length ? ann.pts.concat(predicted) : ann.pts.slice() });
+    };
+    const toPage = (ce: PointerEvent) => {
+      const r = v.pageToClient(page, 0, 0);
+      return [(ce.clientX - r.x) / v.scale, (ce.clientY - r.y) / v.scale];
     };
     draw();
     return {
@@ -322,11 +378,18 @@ export class Editor {
       pointerId: e.pointerId,
       move: (ev) => {
         for (const ce of this.events(ev)) {
-          const r = v.pageToClient(page, 0, 0);
-          const x = (ce.clientX - r.x) / v.scale, y = (ce.clientY - r.y) / v.scale;
+          const [x, y] = toPage(ce);
           const n = ann.pts.length;
           if (Math.hypot(x - ann.pts[n - 3], y - ann.pts[n - 2]) * v.scale < 1.2) continue;
           ann.pts.push(x, y, realPressure ? ce.pressure || 0.5 : 0.5);
+        }
+        predicted = [];
+        if (type === 'pen') {
+          const pe = ((ev as any).getPredictedEvents?.() as PointerEvent[] | undefined) || [];
+          for (const ce of pe.slice(0, 2)) {
+            const [x, y] = toPage(ce);
+            predicted.push(x, y, realPressure ? ce.pressure || 0.5 : 0.5);
+          }
         }
         if (!raf) raf = requestAnimationFrame(draw);
       },

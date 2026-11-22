@@ -2,8 +2,17 @@ import type { ShapeKind, ToolId } from './types';
 
 export interface Settings {
   dockSide: 'left' | 'right';
-  /** 'all': finger and pen draw. 'pen': only a stylus draws, fingers scroll. */
-  drawWith: 'all' | 'pen';
+  /**
+   * 'auto': everything draws until the board shows it can tell the pen from a
+   *         finger (it reports a stylus, or Pen setup found a size difference);
+   *         from then on the pen writes and fingers scroll.
+   * 'all':  finger and pen both draw (two fingers scroll).
+   * 'pen':  only the pen draws, fingers always scroll.
+   */
+  drawWith: 'auto' | 'all' | 'pen';
+  /** contact sizes (CSS px) measured in Pen setup; 0 = not calibrated */
+  penMaxSize: number;
+  fingerSize: number;
   palmErase: boolean;
   googleClientId: string;
   googleApiKey: string;
@@ -14,8 +23,10 @@ const KEY = 'anchor-ink-settings';
 
 const defaults: Settings = {
   dockSide: 'left',
-  drawWith: 'all',
-  palmErase: true,
+  drawWith: 'auto',
+  penMaxSize: 0,
+  fingerSize: 0,
+  palmErase: false,
   googleClientId: import.meta.env.VITE_GOOGLE_CLIENT_ID || '',
   googleApiKey: import.meta.env.VITE_GOOGLE_API_KEY || '',
   googleAppId: import.meta.env.VITE_GOOGLE_APP_ID || '',
