@@ -5,10 +5,12 @@ import { Editor } from './editor';
 import { settings, saveSettings, toolState } from './settings';
 import type { OpenedDoc, ToolId, ShapeKind, DocMeta } from './types';
 import * as store from './store';
-import { ACCEPT, importFiles, importBlob, templatePdf, addTemplatePage, type ImportResult, type Template } from './importers/index';
+import { ACCEPT, importFiles, importBlob, templatePdf, addTemplatePage, defaultTemplate, type ImportResult, type Template } from './importers/index';
+import { choosePaper, describePaper } from './paper';
 import { buildAnnotatedPdf, downloadBytes, shareFile, safeFileName, renderPagePng, makeThumb } from './export';
 import { googleConfigured, pickFromDrive, downloadDriveFile, uploadToDrive, driveAccount, connectDrive, disconnectDrive, preloadGoogle, setupLink, applySetupFromUrl } from './google';
 import { showPenSetup } from './pensetup';
+import { createColorPicker, recentColors, rememberColor } from './colorpicker';
 import { PDFDocument, rgb } from 'pdf-lib';
 import { drawAll } from './annotations';
 
@@ -50,6 +52,7 @@ async function createDoc(r: ImportResult): Promise<OpenedDoc> {
       created: now,
       updated: now,
       pageCount: pdf?.getPageCount() ?? 0,
+      ...(r.template ? { template: r.template } : {}),
     },
     pdf: r.pdf,
     pages: r.pages || [],
@@ -188,8 +191,14 @@ async function showHome() {
     else if (a === 'pensetup') showPenSetup();
     else if (a === 'fullscreen') toggleFullscreen();
     else if (['whiteboard', 'lined', 'graph', 'dots'].includes(a)) {
-      const names: Record<string, string> = { whiteboard: 'Whiteboard', lined: 'Lined paper', graph: 'Graph paper', dots: 'Dot grid' };
-      const doc = await createDoc({ title: `${names[a]} ${new Date().toLocaleDateString()}`, source: 'template:' + a, pdf: await templatePdf(a as Template) });
+      const opts = a === 'whiteboard' ? defaultTemplate('whiteboard') : await choosePaper(a as Exclude<Template, 'whiteboard'>);
+      if (!opts) return;
+      const doc = await createDoc({
+        title: `${describePaper(opts)} ${new Date().toLocaleDateString()}`,
+        source: 'template:' + opts.kind,
+        pdf: await templatePdf(opts),
+        template: opts,
+      });
       openEditor(doc);
     } else if (a === 'doc') {
       const doc = await store.loadDoc(btn.dataset.id!);
@@ -267,6 +276,7 @@ function showSettings() {
       const b = (e.target as HTMLElement).closest<HTMLElement>('button');
       if (!b) return;
       (settings as any)[seg.dataset.k!] = b.dataset.v;
+      if (seg.dataset.k === 'dockSide') { settings.dockPos = null; settings.dockMin = false; }
       saveSettings();
       refresh();
       applyDockSide();
@@ -363,12 +373,19 @@ function openEditor(doc: OpenedDoc) {
     </header>
     <div class="stage">
     <nav class="dock" aria-label="Tools">
+      <div class="dock-head">
+        <div class="dock-grip" title="Drag to move the toolbar">${icon('grip')}</div>
+        <button class="dock-min" data-a="minimize" title="Minimise toolbar">${icon('minimize')}</button>
+      </div>
+      <div class="dock-tools">
       ${TOOLS.map(([id, ic, label]) => `<button class="tool" data-tool="${id}" title="${label}">${icon(ic)}<span>${label}</span><i class="swatch"></i></button>`).join('')}
       <button class="tool gap" data-a="undo" title="Undo">${icon('undo')}<span>Undo</span></button>
       <button class="tool" data-a="redo" title="Redo">${icon('redo')}<span>Redo</span></button>
       <button class="tool gap" data-a="save" title="Save / Share">${icon('download')}<span>Save</span></button>
-      <button class="tool" data-a="swap" title="Move toolbar to other side">${icon('swap')}<span>Move</span></button>
+      <button class="tool" data-a="swap" title="Move toolbar to the other side">${icon('swap')}<span>Swap side</span></button>
+      </div>
     </nav>
+    <button class="dock-mini" title="Show toolbar (drag to move)" hidden><span class="mini-icon"></span><i class="swatch"></i></button>
     <nav class="pagebar" aria-label="Pages">
       <button class="btn icon-only" data-a="pages" title="All pages">${icon('grid')}</button>
       <button class="btn icon-only" data-a="prev" title="Previous page">${icon('up')}</button>
@@ -436,27 +453,118 @@ function openEditor(doc: OpenedDoc) {
     $('.zoom-label').textContent = v.zoom === 1 ? (v.fitMode === 'width' ? 'Fit width' : 'Whole page') : Math.round(v.zoom * 100) + '%';
   };
 
+  const dockTools = $('.dock-tools');
+  const mini = $('.dock-mini');
   let lastPad = '';
+  /**
+   * Lay out the toolbar: docked to a side (pages keep clear of it), floating
+   * wherever the teacher dragged it, or minimised to a single button.
+   */
   applyDockSide = () => {
-    root.dataset.dock = settings.dockSide;
-    // wrap the toolbar into extra columns when the window is too short for one
-    const tool = dock.querySelector<HTMLElement>('.tool')!;
+    const free = !!settings.dockPos;
+    root.dataset.dock = free ? 'free' : settings.dockSide;
+    dock.hidden = settings.dockMin;
+    mini.hidden = !settings.dockMin;
+    // wrap the tools into extra columns when the window is too short for one
+    const tool = dockTools.querySelector<HTMLElement>('.tool')!;
     const th = tool.offsetHeight || 60;
-    const rows = Math.max(3, Math.floor((stage.clientHeight - 32 + 3) / (th + 3)));
-    const want = `repeat(${Math.min(rows, dock.children.length)}, ${th}px)`;
-    if (dock.style.gridTemplateRows !== want) dock.style.gridTemplateRows = want;
-    const dw = Math.round(dock.getBoundingClientRect().width);
+    const head = (dock.querySelector('.dock-head') as HTMLElement).offsetHeight || 30;
+    const rows = Math.max(3, Math.floor((stage.clientHeight - 32 - head + 3) / (th + 3)));
+    const want = `repeat(${Math.min(rows, dockTools.children.length)}, ${th}px)`;
+    if (dockTools.style.gridTemplateRows !== want) dockTools.style.gridTemplateRows = want;
+    // position floating toolbar / mini button (stored as fractions so it survives resizing)
+    const el = settings.dockMin ? mini : dock;
+    for (const x of [dock, mini]) { x.style.left = x.style.top = x.style.right = ''; x.classList.toggle('floating', free); }
+    if (free) {
+      const sw = stage.clientWidth, sh = stage.clientHeight;
+      const ew = el.offsetWidth, eh = el.offsetHeight;
+      el.style.left = Math.round(settings.dockPos!.x * Math.max(0, sw - ew)) + 'px';
+      el.style.top = Math.round(settings.dockPos!.y * Math.max(0, sh - eh)) + 'px';
+    }
+    const docked = !free && !settings.dockMin;
+    const dw = docked ? Math.round(dock.getBoundingClientRect().width) : 0;
     root.style.setProperty('--dockw', dw + 'px');
-    // keep pages clear of the toolbar; narrow windows get tighter gutters
+    // keep pages clear of a docked toolbar; narrow windows get tighter gutters
     const gutter = stage.clientWidth < 700 ? 8 : 24;
-    const pad = dw + gutter + 14;
-    const key = settings.dockSide + pad + gutter;
+    const pad = docked ? dw + gutter + 14 : gutter;
+    const left = settings.dockSide === 'left' ? pad : gutter, right = settings.dockSide === 'right' ? pad : gutter;
+    const key = `${left}/${right}`;
     if (key !== lastPad) {
       lastPad = key;
-      editor.viewer.setSidePad(settings.dockSide === 'left' ? pad : gutter, settings.dockSide === 'right' ? pad : gutter);
+      editor.viewer.setSidePad(left, right);
     }
+    updateMini();
     positionFlyout();
   };
+
+  const updateMini = () => {
+    const t = TOOLS.find(([id]) => id === toolState.tool) || TOOLS[2];
+    mini.querySelector('.mini-icon')!.innerHTML = icon(t[1]);
+    const sw = dock.querySelector<HTMLElement>(`[data-tool="${t[0]}"] .swatch`);
+    (mini.querySelector('.swatch') as HTMLElement).style.background = sw?.style.background || 'transparent';
+  };
+
+  /** drag the toolbar (by its grip) or the minimised button anywhere on the stage */
+  function makeDraggable(handle: HTMLElement, target: () => HTMLElement, onTap?: () => void) {
+    let start: { px: number; py: number; x: number; y: number; id: number } | null = null;
+    let moved = false;
+    handle.addEventListener('pointerdown', (e) => {
+      if ((e.target as HTMLElement).closest('.dock-min')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const el = target();
+      const sr = stage.getBoundingClientRect(), r = el.getBoundingClientRect();
+      start = { px: e.clientX, py: e.clientY, x: r.left - sr.left, y: r.top - sr.top, id: e.pointerId };
+      moved = false;
+      handle.setPointerCapture(e.pointerId);
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (!start || e.pointerId !== start.id) return;
+      const dx = e.clientX - start.px, dy = e.clientY - start.py;
+      if (!moved && Math.hypot(dx, dy) < 8) return;
+      if (!moved) { moved = true; flyout.hidden = true; }
+      const el = target();
+      const maxX = stage.clientWidth - el.offsetWidth, maxY = stage.clientHeight - el.offsetHeight;
+      el.classList.add('floating');
+      el.style.right = '';
+      el.style.left = Math.max(0, Math.min(maxX, start.x + dx)) + 'px';
+      el.style.top = Math.max(0, Math.min(maxY, start.y + dy)) + 'px';
+    });
+    const end = (e: PointerEvent) => {
+      if (!start || e.pointerId !== start.id) return;
+      start = null;
+      if (!moved) { onTap?.(); return; }
+      const el = target();
+      const x = el.offsetLeft, y = el.offsetTop;
+      const maxX = Math.max(1, stage.clientWidth - el.offsetWidth), maxY = Math.max(1, stage.clientHeight - el.offsetHeight);
+      // dropped against an edge → dock to that side; otherwise float right there
+      if (!settings.dockMin && x < 40) { settings.dockPos = null; settings.dockSide = 'left'; }
+      else if (!settings.dockMin && x > maxX - 40) { settings.dockPos = null; settings.dockSide = 'right'; }
+      else settings.dockPos = { x: Math.max(0, Math.min(1, x / maxX)), y: Math.max(0, Math.min(1, y / maxY)) };
+      saveSettings();
+      applyDockSide();
+    };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  }
+  makeDraggable(dock.querySelector('.dock-grip') as HTMLElement, () => dock);
+  makeDraggable(mini, () => mini, () => setMinimized(false));
+
+  function setMinimized(min: boolean) {
+    // the mini button appears where the toolbar was (and vice versa)
+    if (settings.dockPos && min !== settings.dockMin) {
+      const sr = stage.getBoundingClientRect(), r = (min ? dock : mini).getBoundingClientRect();
+      dock.hidden = min; mini.hidden = !min;
+      const to = min ? mini : dock;
+      const maxX = Math.max(1, stage.clientWidth - to.offsetWidth), maxY = Math.max(1, stage.clientHeight - to.offsetHeight);
+      settings.dockPos = { x: Math.max(0, Math.min(1, (r.left - sr.left) / maxX)), y: Math.max(0, Math.min(1, (r.top - sr.top) / maxY)) };
+    }
+    settings.dockMin = min;
+    if (min) flyout.hidden = true;
+    saveSettings();
+    applyDockSide();
+  }
+
   // split screen / window resizing: toolbar may re-wrap, so re-measure everything
   const layoutRo = new ResizeObserver(() => applyDockSide());
   layoutRo.observe(stage);
@@ -502,18 +610,46 @@ function openEditor(doc: OpenedDoc) {
       const c = color[b.dataset.tool as ToolId];
       (b.querySelector('.swatch') as HTMLElement).style.background = c || 'transparent';
     });
+    updateMini();
   };
 
+  /** preset swatches + recent custom colours + a "custom" button that opens the big picker */
   function colorRow(colors: string[], current: string, set: (c: string) => void) {
-    const row = h(`<div class="swatches">${colors.map((c) => `<button class="sw ${c === current ? 'on' : ''}" data-c="${c}" style="--c:${c}" title="${c}"></button>`).join('')}</div>`);
-    row.addEventListener('click', (e) => {
-      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-c]');
-      if (!b) return;
-      set(b.dataset.c!);
-      row.querySelectorAll('.sw').forEach((s) => s.classList.toggle('on', s === b));
-      updateSwatches();
+    const wrap = h('<div class="color-block"></div>');
+    const render = (cur: string) => {
+      const recents = recentColors().filter((c) => !colors.some((p) => p.toLowerCase() === c.toLowerCase()));
+      const all = [...colors, ...recents];
+      const isCustom = !all.some((c) => c.toLowerCase() === cur.toLowerCase());
+      wrap.innerHTML = `<div class="swatches">
+        ${all.map((c) => `<button class="sw ${c.toLowerCase() === cur.toLowerCase() ? 'on' : ''}" data-c="${c}" style="--c:${c}" title="${c}"></button>`).join('')}
+        <button class="sw custom ${isCustom ? 'on' : ''}" data-custom style="${isCustom ? `--c:${cur}` : ''}" title="Custom colour">${isCustom ? '' : icon('plus')}</button>
+      </div>`;
+    };
+    render(current);
+    let picker: HTMLElement | null = null;
+    wrap.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      const b = t.closest<HTMLElement>('[data-c]');
+      if (b) {
+        set(b.dataset.c!);
+        picker?.remove(); picker = null;
+        render(b.dataset.c!);
+        updateSwatches();
+        return;
+      }
+      if (t.closest('[data-custom]')) {
+        if (picker) { picker.remove(); picker = null; positionFlyout(); return; }
+        const start = (wrap.querySelector('.sw.on') as HTMLElement | null)?.dataset.c || current;
+        picker = createColorPicker(
+          start,
+          (hex) => { set(hex); updateSwatches(); const cs = wrap.querySelector<HTMLElement>('[data-custom]'); if (cs) { cs.style.setProperty('--c', hex); cs.innerHTML = ''; } },
+          (hex) => { set(hex); rememberColor(hex); picker?.remove(); picker = null; render(hex); updateSwatches(); positionFlyout(); },
+        );
+        wrap.appendChild(picker);
+        positionFlyout();
+      }
     });
-    return row;
+    return wrap;
   }
   function sizeRow(sizes: number[], current: number, set: (n: number) => void, preview: (n: number) => string) {
     const row = h(`<div class="sizes">${sizes.map((s) => `<button class="sz ${s === current ? 'on' : ''}" data-s="${s}">${preview(s)}</button>`).join('')}</div>`);
@@ -525,7 +661,19 @@ function openEditor(doc: OpenedDoc) {
     });
     return row;
   }
-  const dot = (n: number, max: number) => `<i class="dot" style="width:${Math.max(4, (n / max) * 44)}px;height:${Math.max(4, (n / max) * 44)}px"></i>`;
+  // previews scale with the button (and never overflow it): --d is a 0–1 fraction of the box
+  const dot = (n: number, max: number) => `<i class="dot" style="--d:${Math.max(0.1, n / max).toFixed(3)}"></i>`;
+  const ring = (n: number, max: number) => `<i class="ring" style="--d:${Math.max(0.2, n / max).toFixed(3)}"></i>`;
+  function segRow<T extends string>(opts: [T, string][], current: T, set: (v: T) => void) {
+    const row = h(`<div class="chips">${opts.map(([v, l]) => `<button data-v="${v}" class="${v === current ? 'on' : ''}">${l}</button>`).join('')}</div>`);
+    row.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-v]');
+      if (!b) return;
+      set(b.dataset.v as T);
+      row.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    });
+    return row;
+  }
 
   function openFlyout(t: ToolId) {
     flyout.innerHTML = '';
@@ -539,13 +687,30 @@ function openEditor(doc: OpenedDoc) {
       add(sizeRow(SIZES.pen, T.penSize, (n) => (T.penSize = n), (n) => dot(n, 30)));
     } else if (t === 'highlighter') {
       add('<h4>Highlighter</h4>');
-      add(colorRow(HL_COLORS, T.hlColor, (c) => (T.hlColor = c)));
+      let refreshOp = () => {};
+      add(colorRow(HL_COLORS, T.hlColor, (c) => { T.hlColor = c; refreshOp(); }));
       add('<h4>Width</h4>');
       add(sizeRow(SIZES.highlighter, T.hlSize, (n) => (T.hlSize = n), (n) => dot(n, 64)));
+      const op = h(`<div><h4>Opacity <span class="op-val">${Math.round(T.hlOpacity * 100)}%</span></h4>
+        <input class="slider" type="range" min="10" max="90" step="5" value="${Math.round(T.hlOpacity * 100)}">
+        <div class="op-preview"><span>Sample text</span><i></i></div></div>`);
+      const sl = op.querySelector<HTMLInputElement>('input')!;
+      const prevBar = op.querySelector<HTMLElement>('.op-preview i')!;
+      const showOp = () => {
+        op.querySelector('.op-val')!.textContent = sl.value + '%';
+        prevBar.style.background = T.hlColor;
+        prevBar.style.opacity = String(Number(sl.value) / 100);
+      };
+      sl.addEventListener('input', () => { T.hlOpacity = Number(sl.value) / 100; showOp(); });
+      refreshOp = showOp;
+      showOp();
+      add(op);
     } else if (t === 'eraser') {
       add('<h4>Eraser size</h4>');
-      add(sizeRow(SIZES.eraser, T.eraserSize, (n) => (T.eraserSize = n), (n) => `<i class="ring" style="width:${(n / 96) * 48 + 8}px;height:${(n / 96) * 48 + 8}px"></i>`));
-      add('<p class="muted small">Touch any mark to remove it.</p>');
+      add(sizeRow(SIZES.eraser, T.eraserSize, (n) => (T.eraserSize = n), (n) => ring(n, 96)));
+      add('<h4>Erase</h4>');
+      add(segRow<'partial' | 'stroke'>([['partial', 'Part of a line'], ['stroke', 'Whole marks']], T.eraserMode, (v) => (T.eraserMode = v)));
+      add('<p class="muted small">“Part of a line” rubs out only what the eraser touches. Shapes, text and stickers are always removed whole.</p>');
       const clr = h(`<button class="btn danger wide">${icon('trash')}<span>Clear this page</span></button>`);
       clr.addEventListener('click', async () => {
         const p = editor.viewer.currentPage;
@@ -616,7 +781,8 @@ function openEditor(doc: OpenedDoc) {
     const fr = flyout.getBoundingClientRect();
     const top = Math.max(sr.top + 12, Math.min(sr.bottom - fr.height - 12, r.top + r.height / 2 - fr.height / 2));
     flyout.style.top = top + 'px';
-    if (settings.dockSide === 'left') {
+    const dockOnLeft = dr.left + dr.width / 2 < sr.left + sr.width / 2;
+    if (dockOnLeft) {
       flyout.style.left = Math.min(dr.right + 12, window.innerWidth - fr.width - 8) + 'px';
       flyout.style.right = '';
     } else {
@@ -632,15 +798,19 @@ function openEditor(doc: OpenedDoc) {
     else if (b.dataset.a === 'undo') editor.undo();
     else if (b.dataset.a === 'redo') editor.redo();
     else if (b.dataset.a === 'save') showSaveMenu();
+    else if (b.dataset.a === 'minimize') setMinimized(true);
     else if (b.dataset.a === 'swap') {
-      settings.dockSide = settings.dockSide === 'left' ? 'right' : 'left';
+      // from floating: dock to the nearer side's opposite; from docked: swap sides
+      if (settings.dockPos) settings.dockSide = settings.dockPos.x < 0.5 ? 'right' : 'left';
+      else settings.dockSide = settings.dockSide === 'left' ? 'right' : 'left';
+      settings.dockPos = null;
       saveSettings();
       applyDockSide();
     }
   });
   // close the options panel when the teacher starts working on the page
   stage.addEventListener('pointerdown', (e) => {
-    if (!flyout.hidden && !(e.target as HTMLElement).closest('.dock, .pagebar')) flyout.hidden = true;
+    if (!flyout.hidden && !(e.target as HTMLElement).closest('.dock, .pagebar, .dock-mini')) flyout.hidden = true;
   }, true);
 
   // --- top & page bars
@@ -693,9 +863,10 @@ function openEditor(doc: OpenedDoc) {
     const v = editor.viewer;
     const i = v.currentPage;
     const cur = v.pagesView[i];
-    const tpl = (doc.meta.source.startsWith('template:') ? doc.meta.source.slice(9) : 'whiteboard') as Template;
+    // paper documents get another sheet of the same paper (older docs: default spacing)
+    const tpl = doc.meta.template || (doc.meta.source.startsWith('template:') ? defaultTemplate(doc.meta.source.slice(9) as Template) : null);
     await rebuildPdf(async (pdf) => {
-      if (doc.meta.source.startsWith('template:')) await addTemplatePage(pdf, tpl, i + 1, [cur.w, cur.h]);
+      if (tpl) await addTemplatePage(pdf, tpl, i + 1, [cur.w, cur.h]);
       else {
         const p = pdf.insertPage(i + 1, [cur.w, cur.h]);
         p.drawRectangle({ x: 0, y: 0, width: cur.w, height: cur.h, color: rgb(1, 1, 1) });

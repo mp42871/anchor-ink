@@ -14,8 +14,8 @@ and no account: documents stay on the board unless you choose to share them.
 
 | | |
 |---|---|
-| **Opens** | PDF · Word (.docx) · PowerPoint (.pptx) · Google Docs / Slides / Sheets (via Drive or downloaded as PDF) · images (PNG, JPG, GIF, WebP, BMP, SVG) · plain text · blank whiteboard, lined, graph and dot-grid paper |
-| **Annotates** | Pressure-aware pen · highlighter · stroke eraser (or wipe with your palm) · lines, arrows, rectangles, ellipses · typed text · sticky notes · stamps (✓ ✗ ★ 👍 💯 ① ② ③ A+ …) · laser pointer · select / move / resize / duplicate / delete · undo & redo · add or remove pages |
+| **Opens** | PDF · Word (.docx) · PowerPoint (.pptx) · Google Docs / Slides / Sheets (via Drive or downloaded as PDF) · images (PNG, JPG, GIF, WebP, BMP, SVG) · plain text · blank whiteboard, plus lined, handwriting, graph and dot-grid paper with adjustable spacing and orientation |
+| **Annotates** | Pressure-aware pen · highlighter with adjustable opacity · eraser that rubs out part of a line or whole marks (or wipe with your palm) · preset and custom colours · lines, arrows, rectangles, ellipses · typed text · sticky notes · stamps (✓ ✗ ★ 👍 💯 ① ② ③ A+ …) · laser pointer · select / move / resize / duplicate / delete · undo & redo · add or remove pages |
 | **Moves around** | Two-finger scroll and pinch-zoom while any tool is selected · page up/down buttons · page grid · fit width / whole page |
 | **Saves** | Auto-saves every change on the board (Library on the home screen) · **Download PDF** · **Share / Email** (Gmail, Outlook, Teams, Classroom… through the device share sheet) · **Save to Google Drive** with a shareable link · page as PNG · print |
 
@@ -53,8 +53,15 @@ annotation.
   **Pen and fingers write**.
 
 ### Everything else
-* Tap the active tool again to show its colours and sizes.
-* **Move** (⇄) swaps the toolbar to the other side, for whichever side you're standing on.
+* Tap the active tool again to show its colours and sizes. The rainbow **+** swatch
+  opens a large colour picker, and your recent custom colours are kept next to the presets.
+* **Toolbar:** drag the dotted grip to move it anywhere. Drop it against the left or right
+  edge to dock it there (pages then keep clear of it). **–** shrinks it to a single round
+  button showing the current tool: tap the button to bring the toolbar back, or drag it
+  out of the way. **Swap side** docks it on the other side.
+* **Paper:** Lined, Graph and Dot grid ask for spacing (wide, college or narrow ruled;
+  handwriting lines with a dashed midline; 5 mm to 2 cm grids; or any custom spacing) and
+  portrait or landscape. **Add page** adds another sheet of the same paper.
 * **Select**: tap a mark, or drag a box around several. Then drag to move, use the blue
   handle to resize, or 🗑 / ⧉. Double-tap text or a sticky note to edit it.
 * Keyboard: `Ctrl+Z` / `Ctrl+Y`, `Delete`, `PgUp` / `PgDn`, `Ctrl+scroll` to zoom.

@@ -1,5 +1,5 @@
 import { PDFDocument, rgb } from 'pdf-lib';
-import type { Annotation } from '../types';
+import type { Annotation, TemplateOpts } from '../types';
 import { extractProject } from './project';
 
 export interface ImportResult {
@@ -7,6 +7,7 @@ export interface ImportResult {
   source: string;
   pdf: Uint8Array;
   pages?: Annotation[][];
+  template?: TemplateOpts;
 }
 
 export type Progress = (msg: string) => void;
@@ -135,33 +136,74 @@ export async function imagesToPdf(blobs: Blob[]): Promise<Uint8Array> {
   return pdf.save();
 }
 
-export type Template = 'whiteboard' | 'lined' | 'graph' | 'dots';
+export type Template = TemplateOpts['kind'];
 
-export async function templatePdf(t: Template, pageCount = 1): Promise<Uint8Array> {
+export const MM = 72 / 25.4; // points per millimetre
+
+export function defaultTemplate(kind: Template): TemplateOpts {
+  switch (kind) {
+    case 'lined': return { kind, spacing: 8.7 * MM, style: 'ruled', orientation: 'portrait' };
+    case 'graph': return { kind, spacing: 6.35 * MM, orientation: 'portrait' };
+    case 'dots': return { kind, spacing: 8.5 * MM, orientation: 'portrait' };
+    default: return { kind: 'whiteboard', spacing: 0, orientation: 'landscape' };
+  }
+}
+
+export function templateSize(o: TemplateOpts): [number, number] {
+  if (o.kind === 'whiteboard') return [1600, 900];
+  return o.orientation === 'landscape' ? [792, 612] : [612, 792];
+}
+
+export async function templatePdf(o: TemplateOpts, pageCount = 1): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
-  for (let n = 0; n < pageCount; n++) await addTemplatePage(pdf, t);
+  for (let n = 0; n < pageCount; n++) await addTemplatePage(pdf, o);
   return pdf.save();
 }
 
-export async function addTemplatePage(pdf: PDFDocument, t: Template, index?: number, size?: [number, number]) {
-  const [W, H] = size || (t === 'whiteboard' ? [1600, 900] : [612, 792]);
+const BLUE = rgb(0.6, 0.75, 0.92);
+const RED = rgb(0.93, 0.45, 0.45);
+const GRID = rgb(0.62, 0.78, 0.9);
+const DOT = rgb(0.55, 0.6, 0.68);
+
+export async function addTemplatePage(pdf: PDFDocument, o: TemplateOpts, index?: number, size?: [number, number]) {
+  const [W, H] = size || templateSize(o);
   const page = index === undefined ? pdf.addPage([W, H]) : pdf.insertPage(index, [W, H]);
   page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: rgb(1, 1, 1) });
-  if (t === 'lined') {
-    const step = 24;
-    for (let y = H - 72; y > 36; y -= step)
-      page.drawLine({ start: { x: 0, y }, end: { x: W, y }, thickness: 0.6, color: rgb(0.6, 0.75, 0.92) });
-    page.drawLine({ start: { x: 72, y: 0 }, end: { x: 72, y: H }, thickness: 0.8, color: rgb(0.93, 0.45, 0.45) });
-  } else if (t === 'graph') {
-    const step = 18;
-    for (let x = 0; x <= W; x += step)
-      page.drawLine({ start: { x, y: 0 }, end: { x, y: H }, thickness: (x / step) % 5 === 0 ? 0.7 : 0.3, color: rgb(0.62, 0.78, 0.9) });
-    for (let y = H; y >= 0; y -= step)
-      page.drawLine({ start: { x: 0, y }, end: { x: W, y }, thickness: ((H - y) / step) % 5 === 0 ? 0.7 : 0.3, color: rgb(0.62, 0.78, 0.9) });
-  } else if (t === 'dots') {
-    const step = 24;
-    for (let x = step; x < W; x += step)
-      for (let y = step; y < H; y += step) page.drawCircle({ x, y, size: 0.9, color: rgb(0.6, 0.65, 0.72) });
+  const s = Math.max(2 * MM, o.spacing || 0);
+  if (o.kind === 'lined') {
+    const top = H - Math.min(72, H * 0.09);
+    const bottom = Math.min(36, H * 0.045);
+    if (o.style === 'primary') {
+      // handwriting lines: solid top line, dashed midline, solid baseline, then a gap
+      const gap = s * 0.55;
+      for (let y = top; y - s > bottom; y -= s + gap) {
+        page.drawLine({ start: { x: 0, y }, end: { x: W, y }, thickness: 0.9, color: BLUE });
+        page.drawLine({ start: { x: 0, y: y - s / 2 }, end: { x: W, y: y - s / 2 }, thickness: 0.7, color: BLUE, dashArray: [6, 5] });
+        page.drawLine({ start: { x: 0, y: y - s }, end: { x: W, y: y - s }, thickness: 1.1, color: RED });
+      }
+    } else {
+      for (let y = top; y > bottom; y -= s) page.drawLine({ start: { x: 0, y }, end: { x: W, y }, thickness: 0.6, color: BLUE });
+      page.drawLine({ start: { x: 72, y: 0 }, end: { x: 72, y: H }, thickness: 0.8, color: RED });
+    }
+  } else if (o.kind === 'graph') {
+    // bold every 5th line when the squares are small enough for it to help
+    const major = s < 9 * MM ? 5 : 0;
+    const n = Math.floor(W / s), m = Math.floor(H / s);
+    const ox = (W - n * s) / 2, oy = (H - m * s) / 2;
+    for (let i = 0; i <= n; i++) {
+      const x = ox + i * s;
+      page.drawLine({ start: { x, y: oy }, end: { x, y: H - oy }, thickness: major && i % major === 0 ? 0.8 : 0.35, color: GRID });
+    }
+    for (let j = 0; j <= m; j++) {
+      const y = H - oy - j * s;
+      page.drawLine({ start: { x: ox, y }, end: { x: W - ox, y }, thickness: major && j % major === 0 ? 0.8 : 0.35, color: GRID });
+    }
+  } else if (o.kind === 'dots') {
+    const n = Math.floor(W / s), m = Math.floor(H / s);
+    const ox = (W - n * s) / 2, oy = (H - m * s) / 2;
+    const r = Math.max(0.7, Math.min(1.6, s / 18));
+    for (let i = 0; i <= n; i++)
+      for (let j = 0; j <= m; j++) page.drawCircle({ x: ox + i * s, y: oy + j * s, size: r, color: DOT });
   }
   return page;
 }
