@@ -20,7 +20,7 @@ export function showPenSetup(onDone?: () => void) {
   </div>`);
   const m = modal('Pen setup', body, { wide: true, onClose: () => { ro.disconnect(); onDone?.(); } });
   const pad = body.querySelector<HTMLCanvasElement>('.pad')!;
-  const ctx = (pad.getContext('2d', { desynchronized: true }) || pad.getContext('2d'))!;
+  const ctx = pad.getContext('2d')!; // not desynchronized: it turns transparent canvases black on some panels
   const stepText = body.querySelector<HTMLElement>('.step-text')!;
   const hint = body.querySelector<HTMLElement>('.pad-hint')!;
   const readout = body.querySelector<HTMLElement>('.readout')!;

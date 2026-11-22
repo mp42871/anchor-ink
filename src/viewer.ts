@@ -373,8 +373,10 @@ export class Viewer {
     c.width = Math.floor(p.w * s);
     c.height = Math.floor(p.h * s);
     p.el.appendChild(c);
-    // desynchronized = low-latency path (draws without waiting for the compositor)
-    const ctx = (c.getContext('2d', { desynchronized: true }) || c.getContext('2d'))!;
+    // NOTE: never use { desynchronized: true } here. On Android / ChromeOS panels
+    // (e.g. Clevertouch) the low-latency path drops transparency and this
+    // page-sized overlay turns solid black while writing.
+    const ctx = c.getContext('2d')!;
     const reset = () => {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, c.width, c.height);
