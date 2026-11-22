@@ -34,6 +34,15 @@ annotation.
 
 ## Using it on the board
 
+### Learning the app
+* **Tutorial** (home screen): opens a 3-page practice sheet with tasks to try (circle, highlight,
+  erase, stamp, arrow, sticky note, select, zoom, save) and walks through every tool with a
+  guided tour. New users see a welcome banner offering it, and the tour runs automatically the
+  first time any document is opened.
+* **Help** (home screen and editor top bar): searchable topics covering every feature, plus
+  troubleshooting and keyboard shortcuts. It can also replay the tour, open the practice
+  sheet or start Pen setup.
+
 ### Writing with the Clevertouch pen
 * The pen writes as soon as a document opens. No tool needs to be picked first.
 * **Run Pen setup once per board** (home screen → *Pen setup*). Clevertouch's passive
@@ -142,6 +151,7 @@ rather than opening the files directly.
   100+ page documents stay smooth.
 * `src/editor.ts`: pointer and gesture engine and all the tools. It turns pointer input into
   page-space annotations, and handles two-finger pan/pinch, palm rejection and undo history.
+* `src/tour.ts`, `src/help.ts`, `src/practice.ts`: guided tour engine, help topics and the generated practice sheet.
 * `src/input.ts` + `src/pensetup.ts`: classifies each contact as pen, finger or palm, and runs the Pen setup calibration.
 * `src/annotations.ts`: annotation model, rendering (strokes via
   [perfect-freehand](https://github.com/steveruizok/perfect-freehand)) and hit-testing.
