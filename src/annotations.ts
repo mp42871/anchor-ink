@@ -40,7 +40,7 @@ function strokeOutline(a: StrokeAnn): Path2D {
 function drawHighlighter(ctx: CanvasRenderingContext2D, a: StrokeAnn) {
   const pts = a.pts;
   ctx.save();
-  ctx.globalAlpha = 0.38;
+  ctx.globalAlpha = a.opacity ?? 0.38;
   ctx.strokeStyle = a.color;
   ctx.lineWidth = a.size;
   ctx.lineCap = 'round';
@@ -305,4 +305,66 @@ export function scaled<T extends Annotation>(a: T, s: number, ox: number, oy: nu
     c.x = fx(a.x); c.y = fy(a.y); c.size = a.size * s;
   }
   return c;
+}
+
+/**
+ * Partial eraser: cut the part of a pen / highlighter stroke that lies under a
+ * circle at (x, y) with radius r. Returns null when the stroke isn't touched,
+ * otherwise the remaining pieces (possibly none) as new strokes.
+ */
+export function eraseFromStroke(a: StrokeAnn, x: number, y: number, r: number): StrokeAnn[] | null {
+  const reach = r + a.size / 2;
+  if (!hitTest(a, x, y, r)) return null;
+  // resample so no gap between points is larger than a fraction of the eraser,
+  // otherwise a quick stroke with sparse points could not be cut precisely
+  const step = Math.max(0.5, Math.min(reach, a.size) / 3);
+  const p = a.pts;
+  const pts: number[] = [p[0], p[1], p[2]];
+  for (let i = 3; i < p.length; i += 3) {
+    const x0 = p[i - 3], y0 = p[i - 2], q0 = p[i - 1];
+    const x1 = p[i], y1 = p[i + 1], q1 = p[i + 2];
+    const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / step);
+    for (let k = 1; k <= n; k++) {
+      const t = k / n;
+      pts.push(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, q0 + (q1 - q0) * t);
+    }
+  }
+  const pieces: StrokeAnn[] = [];
+  let run: number[] = [];
+  const flush = () => {
+    // keep fragments long enough to be visible
+    if (run.length >= 6) pieces.push({ ...a, id: newId(), pts: run });
+    run = [];
+  };
+  for (let i = 0; i < pts.length; i += 3) {
+    if (Math.hypot(pts[i] - x, pts[i + 1] - y) < reach) flush();
+    else run.push(pts[i], pts[i + 1], pts[i + 2]);
+  }
+  flush();
+  // simplify each piece back down so repeated erasing doesn't bloat the document
+  const tol = Math.max(0.05, a.size * 0.08);
+  for (const pc of pieces) pc.pts = simplify(pc.pts, tol);
+  return pieces;
+}
+
+/** Ramer–Douglas–Peucker on flat [x, y, p, …] arrays (keeps pressure of kept points). */
+function simplify(pts: number[], tol: number): number[] {
+  const n = pts.length / 3;
+  if (n <= 2) return pts;
+  const keep = new Uint8Array(n);
+  keep[0] = keep[n - 1] = 1;
+  const stack: [number, number][] = [[0, n - 1]];
+  while (stack.length) {
+    const [i0, i1] = stack.pop()!;
+    const ax = pts[i0 * 3], ay = pts[i0 * 3 + 1], bx = pts[i1 * 3], by = pts[i1 * 3 + 1];
+    let best = -1, bestD = tol;
+    for (let i = i0 + 1; i < i1; i++) {
+      const d = distToSeg(pts[i * 3], pts[i * 3 + 1], ax, ay, bx, by);
+      if (d > bestD) { bestD = d; best = i; }
+    }
+    if (best >= 0) { keep[best] = 1; stack.push([i0, best], [best, i1]); }
+  }
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) if (keep[i]) out.push(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
+  return out;
 }

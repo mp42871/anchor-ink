@@ -2,6 +2,9 @@ import type { ShapeKind, ToolId } from './types';
 
 export interface Settings {
   dockSide: 'left' | 'right';
+  /** free-floating toolbar position as fractions of the free space (null = docked to dockSide) */
+  dockPos: { x: number; y: number } | null;
+  dockMin: boolean;
   /**
    * 'auto': everything draws until the board shows it can tell the pen from a
    *         finger (it reports a stylus, or Pen setup found a size difference);
@@ -23,6 +26,8 @@ const KEY = 'anchor-ink-settings';
 
 const defaults: Settings = {
   dockSide: 'left',
+  dockPos: null,
+  dockMin: false,
   drawWith: 'auto',
   penMaxSize: 0,
   fingerSize: 0,
@@ -60,6 +65,7 @@ export const toolState = {
   penSize: 6, // screen px at the moment of drawing
   hlColor: '#ffeb3b',
   hlSize: 28,
+  hlOpacity: 0.38,
   shapeKind: 'arrow' as ShapeKind,
   shapeColor: '#e53935',
   shapeSize: 6,
@@ -71,4 +77,6 @@ export const toolState = {
   stampColor: '#2e7d32',
   stampSize: 90,
   eraserSize: 30,
+  /** 'partial' cuts through lines, 'stroke' removes whole marks */
+  eraserMode: 'partial' as 'partial' | 'stroke',
 };

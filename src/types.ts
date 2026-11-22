@@ -20,6 +20,8 @@ export interface StrokeAnn extends AnnBase {
   pts: number[];
   /** true when pressure was simulated (finger/mouse) */
   sim?: boolean;
+  /** highlighter transparency (0–1); default 0.38 */
+  opacity?: number;
 }
 
 export interface ShapeAnn extends AnnBase {
@@ -57,6 +59,15 @@ export interface StampAnn extends AnnBase {
 
 export type Annotation = StrokeAnn | ShapeAnn | TextAnn | NoteAnn | StampAnn;
 
+export interface TemplateOpts {
+  kind: 'whiteboard' | 'lined' | 'graph' | 'dots';
+  /** line / grid / dot spacing in PDF points */
+  spacing: number;
+  /** lined paper: 'ruled' = single lines, 'primary' = handwriting lines with dashed midline */
+  style?: 'ruled' | 'primary';
+  orientation: 'portrait' | 'landscape';
+}
+
 export interface DocMeta {
   id: string;
   title: string;
@@ -65,6 +76,8 @@ export interface DocMeta {
   updated: number;
   pageCount: number;
   thumb?: string;
+  /** set for blank paper documents so added pages match */
+  template?: TemplateOpts;
 }
 
 export interface OpenedDoc {

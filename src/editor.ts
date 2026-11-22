@@ -3,7 +3,7 @@ import { History } from './history';
 import { settings, toolState } from './settings';
 import { classify, fingerDraws, type Contact } from './input';
 import type { Annotation, NoteAnn, ShapeAnn, StampAnn, StrokeAnn, TextAnn, ToolId } from './types';
-import { bbox, drawAnnotation, hitTest, newId, rectsIntersect, scaled, translated, FONT_STACK } from './annotations';
+import { bbox, drawAnnotation, eraseFromStroke, hitTest, newId, rectsIntersect, scaled, translated, FONT_STACK } from './annotations';
 
 interface Action {
   started: number;
@@ -356,6 +356,7 @@ export class Editor {
       type,
       color: type === 'pen' ? toolState.penColor : toolState.hlColor,
       size: (type === 'pen' ? toolState.penSize : toolState.hlSize) / v.scale,
+      ...(type === 'highlighter' ? { opacity: toolState.hlOpacity } : {}),
       pts: [loc.x, loc.y, realPressure ? e.pressure : 0.5],
       sim: !realPressure,
     };
@@ -416,6 +417,7 @@ export class Editor {
 
   private eraserAction(e: PointerEvent, radiusPx: number): Action {
     const v = this.viewer;
+    const partial = toolState.eraserMode === 'partial';
     const befores = new Map<number, Annotation[]>();
     let last: { x: number; y: number } | null = null;
     const eraseAt = (cx: number, cy: number) => {
@@ -423,8 +425,16 @@ export class Editor {
       if (!loc) return;
       const list = this.anns[loc.page] || [];
       const r = radiusPx / v.scale;
-      const keep = list.filter((a) => !hitTest(a, loc.x, loc.y, r));
-      if (keep.length !== list.length) {
+      let changed = false;
+      const keep: Annotation[] = [];
+      for (const a of list) {
+        if (partial && (a.type === 'pen' || a.type === 'highlighter')) {
+          const pieces = eraseFromStroke(a, loc.x, loc.y, r);
+          if (pieces) { changed = true; keep.push(...pieces); } else keep.push(a);
+        } else if (hitTest(a, loc.x, loc.y, r)) changed = true;
+        else keep.push(a);
+      }
+      if (changed) {
         if (!befores.has(loc.page)) befores.set(loc.page, list);
         this.anns[loc.page] = keep;
         v.drawAnnotations(loc.page);
