@@ -44,7 +44,8 @@ annotation.
   sheet or start Pen setup.
 
 ### Writing with the Clevertouch pen
-* The pen writes as soon as a document opens. No tool needs to be picked first.
+* Documents open with the **Scroll** tool selected, so the first touch never leaves a stray
+  mark. Tap **Pen** to write.
 * **Run Pen setup once per board** (home screen → *Pen setup*). Clevertouch's passive
   pens report to the browser as ordinary touches. The only difference is how big the
   contact is, so Pen setup has you write with the pen and then draw with a finger, and
@@ -62,7 +63,8 @@ annotation.
   **Pen and fingers write**.
 
 ### Everything else
-* Tap the active tool again to show its colours and sizes. The rainbow **+** swatch
+* The first tap on a tool selects it. Tap the selected tool a second time to show its colours
+  and sizes. The rainbow **+** swatch
   opens a large colour picker, and your recent custom colours are kept next to the presets.
 * **Toolbar:** drag the dotted grip to move it anywhere. Drop it against the left or right
   edge to dock it there (pages then keep clear of it). **–** shrinks it to a single round
@@ -166,6 +168,14 @@ rather than opening the files directly.
 * `src/export.ts`: flattens annotations onto each page with `pdf-lib`, handling rotated
   pages, and embeds the editable project.
 * `src/store.ts`: IndexedDB library, with auto-save.
+
+### Older displays
+Many interactive displays ship an old built-in Chrome or Android WebView. The build
+targets Chrome 80-era browsers: syntax is compiled down, missing built-ins are polyfilled
+(`@vitejs/plugin-legacy`, modern-polyfills mode), and pdf.js uses its legacy build, which
+carries its own polyfills inside the PDF worker. Slow steps have time limits, so a failure
+shows an error naming the display's browser instead of a spinner that never ends.
+*Help → About this display* shows the same browser line.
 
 ### Limitations
 * Word and PowerPoint are converted in the browser. Complex layouts (SmartArt, some

@@ -18,6 +18,7 @@
   },
   "homepage": "https://github.com/mp42871/anchor-ink#readme",
   "dependencies": {
+    "core-js": "^3.51.0",
     "docx-preview": "^0.4.1",
     "jszip": "^3.10.2",
     "modern-screenshot": "^4.7.0",
@@ -27,6 +28,8 @@
     "pptx-preview": "^1.0.7"
   },
   "devDependencies": {
+    "@vitejs/plugin-legacy": "^8.2.4",
+    "terser": "^5.51.4",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "vite-plugin-pwa": "^2.0.0"

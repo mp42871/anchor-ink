@@ -1,6 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import { domToCanvas } from 'modern-screenshot';
 import { canvasToBytes, type Progress } from './index';
+import { withTimeout } from '../envinfo';
 
 /**
  * Office documents are laid out in the browser (docx-preview / pptx-preview),
@@ -20,10 +21,14 @@ function makeHost(width?: number) {
 }
 
 async function settle(host: HTMLElement) {
-  await document.fonts?.ready;
-  const imgs = Array.from(host.querySelectorAll('img'));
-  await Promise.all(imgs.map((i) => (i.complete ? null : i.decode().catch(() => null))));
-  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const wait = (async () => {
+    await document.fonts?.ready;
+    const imgs = Array.from(host.querySelectorAll('img'));
+    await Promise.all(imgs.map((i) => (i.complete ? null : i.decode().catch(() => null))));
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  })();
+  // fonts / images that never finish loading must not stall the conversion: carry on after 10 s
+  await Promise.race([wait, new Promise((r) => setTimeout(r, 10_000))]);
 }
 
 async function rasterize(el: HTMLElement, scale: number) {
@@ -45,7 +50,7 @@ async function pagesToPdf(els: HTMLElement[], scale: number, progress: Progress,
   const pdf = await PDFDocument.create();
   for (let i = 0; i < els.length; i++) {
     progress(`${label} ${i + 1} of ${els.length}…`);
-    const { canvas, w, h } = await rasterize(els[i], scale);
+    const { canvas, w, h } = await withTimeout(rasterize(els[i], scale), 45_000, `Converting ${label.toLowerCase()} ${i + 1}`);
     const img = await pdf.embedJpg(await canvasToBytes(canvas, 'image/jpeg', 0.9));
     // CSS px → points (96dpi → 72dpi)
     const pw = w * 0.75, ph = h * 0.75;
@@ -60,7 +65,7 @@ export async function docxToPdf(blob: Blob, progress: Progress): Promise<Uint8Ar
   const { renderAsync } = await import('docx-preview');
   const host = makeHost();
   try {
-    await renderAsync(blob, host, undefined, {
+    await withTimeout(renderAsync(blob, host, undefined, {
       className: 'docx',
       inWrapper: true,
       breakPages: true,
@@ -71,7 +76,7 @@ export async function docxToPdf(blob: Blob, progress: Progress): Promise<Uint8Ar
       renderEndnotes: true,
       useBase64URL: true,
       experimental: true,
-    });
+    }), 60_000, 'Laying out the Word document');
     // the wrapper adds grey padding/shadows we don't want in the page images
     const style = document.createElement('style');
     style.textContent =
@@ -107,7 +112,7 @@ export async function pptxToPdf(blob: Blob, progress: Progress): Promise<Uint8Ar
   const host = makeHost(W);
   try {
     const previewer = init(host, { width: W, height: H, mode: 'list' });
-    await previewer.preview(buf);
+    await withTimeout(previewer.preview(buf), 60_000, 'Reading the slides');
     await settle(host);
     await new Promise((r) => setTimeout(r, 300)); // charts animate in
     let slides = Array.from(host.querySelectorAll<HTMLElement>('.pptx-preview-slide-wrapper'));
