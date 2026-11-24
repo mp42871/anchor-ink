@@ -1,5 +1,6 @@
 import { icon } from './icons';
-import { h, modal } from './ui';
+import { h, modal, esc } from './ui';
+import { browserInfo } from './envinfo';
 
 interface HelpActions {
   tour?: () => void;
@@ -12,13 +13,13 @@ const TOPICS: [string, string, string][] = [
     <ol>
       <li><b>Open something.</b> On the home screen tap <b>Open a file</b> (PDF, Word, PowerPoint, images) or <b>Google Drive</b>.
         You can also drag a file from a USB drive onto the screen. Or start a <b>Whiteboard</b>, <b>Lined</b>, <b>Graph</b> or <b>Dot grid</b> page.</li>
-      <li><b>Write on it.</b> The pen is ready straight away. Just write.</li>
+      <li><b>Write on it.</b> Documents open with the <b>Scroll</b> tool, so a stray touch never leaves a mark. Tap <b>Pen</b> on the toolbar, then write.</li>
       <li><b>Move around.</b> Two fingers scroll and pinch-zoom. Your ink stays exactly where you wrote it on the document.</li>
       <li><b>Done.</b> Everything saves on this board automatically. Find it again under <b>Recent documents</b> on the home screen.
         Use <b>Save / Share</b> to download, email or print it.</li>
     </ol>`],
   ['pen', 'Writing with the pen', `
-    <p>Tap <b>Pen</b> on the toolbar, then write. Tap <b>Pen</b> again to change colour and thickness.</p>
+    <p>Tap <b>Pen</b> on the toolbar, then write. Once Pen is selected, tap it a <b>second time</b> to change colour and thickness.</p>
     <p><b>Run Pen setup once per board</b> (home screen → <b>Pen setup</b>). It learns the difference between the
       Clevertouch pen and your finger, so that:</p>
     <ul><li>the pen writes,</li><li>fingers scroll and zoom,</li><li>your hand resting on the board is ignored.</li></ul>
@@ -30,7 +31,7 @@ const TOPICS: [string, string, string][] = [
     </ul>`],
   ['move', 'Scrolling, zooming & pages', `
     <ul>
-      <li><b>Scroll:</b> drag with two fingers, or pick the <b>Scroll</b> (hand) tool and drag with one.</li>
+      <li><b>Scroll:</b> documents open with the <b>Scroll</b> (hand) tool, so one finger or the pen drags the page. With any other tool, drag with two fingers.</li>
       <li><b>Zoom:</b> pinch with two fingers, or use <b>−</b> and <b>+</b> on the page bar at the bottom.
         Tap the zoom label to switch between <b>Fit width</b> and <b>Whole page</b>.</li>
       <li><b>Pages:</b> the <b>˄ ˅</b> arrows go to the previous or next page. The grid button shows every page, and you can tap one to jump to it or remove it.</li>
@@ -38,7 +39,7 @@ const TOPICS: [string, string, string][] = [
     </ul>`],
   ['colours', 'Colours, thickness & highlighter', `
     <ul>
-      <li>Tap the selected tool again to open its options.</li>
+      <li>The first tap on a tool selects it. Tap the <b>selected</b> tool a second time to open its options, and again to close them.</li>
       <li>The rainbow <b>+</b> opens a large colour picker. Drag in the square and along the rainbow bar, then tap <b>Use colour</b>.
         Colours you pick are kept next to the presets.</li>
       <li><b>Highlighter:</b> choose a colour, width and <b>opacity</b>. Lower opacity is more see-through.</li>
@@ -126,6 +127,8 @@ const TOPICS: [string, string, string][] = [
       <dt>New features aren't showing.</dt>
       <dd>Close and reopen the app (or refresh the page) once or twice. The app updates itself in the background.</dd>
     </dl>`],
+  ['about', 'About this display', `<p>Browser: <b class="about-browser"></b></p>
+    <p class="muted">If something doesn't work on one display but does on another, send this line to whoever looks after Anchor Ink.</p>`],
   ['keys', 'Keyboard shortcuts', `
     <ul>
       <li><b>Ctrl+Z</b> undo · <b>Ctrl+Y</b> or <b>Ctrl+Shift+Z</b> redo</li>
@@ -150,6 +153,7 @@ export function showHelp(actions: HelpActions = {}, openTopic?: string) {
     <p class="muted help-none" hidden>No help topics match. Try a different word.</p>
   </div>`);
   const m = modal('Help', body, { wide: true });
+  body.querySelector('.about-browser')!.innerHTML = esc(browserInfo());
   body.querySelector('[data-h=tour]')?.addEventListener('click', () => { m.close(); actions.tour!(); });
   body.querySelector('[data-h=practice]')?.addEventListener('click', () => { m.close(); actions.practice!(); });
   body.querySelector('[data-h=pen]')?.addEventListener('click', () => { m.close(); actions.penSetup!(); });

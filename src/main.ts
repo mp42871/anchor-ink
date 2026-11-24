@@ -12,6 +12,7 @@ import { googleConfigured, pickFromDrive, downloadDriveFile, uploadToDrive, driv
 import { showPenSetup } from './pensetup';
 import { runTour, isTourRunning, type TourStep } from './tour';
 import { showHelp } from './help';
+import { browserInfo } from './envinfo';
 import { practicePdf } from './practice';
 import { createColorPicker, recentColors, rememberColor } from './colorpicker';
 import { PDFDocument, rgb } from 'pdf-lib';
@@ -40,7 +41,7 @@ async function handleFiles(files: File[]) {
   } catch (e: any) {
     busy(null);
     console.error(e);
-    modal('Could not open file', `<p class="lead">${esc(e?.message || String(e))}</p>`);
+    modal('Could not open file', `<p class="lead">${esc(e?.message || String(e))}</p><p class="muted small">Display browser: ${esc(browserInfo())}</p>`);
   }
 }
 
@@ -658,9 +659,12 @@ function openEditor(doc: OpenedDoc) {
     editor.setTool(t);
     dock.querySelectorAll<HTMLElement>('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
     const hasOptions = ['pen', 'highlighter', 'eraser', 'shape', 'text', 'note', 'stamp'].includes(t);
-    if (hasOptions && (was !== t || (toggleFlyout && flyout.hidden))) openFlyout(t);
-    else if (toggleFlyout && was === t) flyout.hidden = !flyout.hidden;
-    else if (!hasOptions) flyout.hidden = true;
+    // First tap just picks the tool; tapping the already-selected tool again
+    // opens (or closes) its colour / size options.
+    if (toggleFlyout && was === t && hasOptions) {
+      if (flyout.hidden) openFlyout(t);
+      else flyout.hidden = true;
+    } else flyout.hidden = true;
     updateSwatches();
   };
 
@@ -1069,16 +1073,16 @@ function openEditor(doc: OpenedDoc) {
     });
   }
 
-  selectTool(toolState.tool === 'laser' ? 'pen' : toolState.tool);
-  flyout.hidden = true;
+  // every document opens with the Scroll tool, so a first touch never leaves a mark
+  selectTool('hand');
   window.addEventListener('resize', positionFlyout);
 
   const toolbarOpen = () => { if (settings.dockMin) setMinimized(false); flyout.hidden = true; };
   const tourSteps: TourStep[] = [
     { title: 'Welcome! 👋', text: 'Here is a quick look at the tools. You can try each one while the tour is open. Use <b>Next</b> to continue, or <b>Skip tour</b> to stop.', before: toolbarOpen },
-    { target: '.dock [data-tool=pen]', title: 'Write with the pen', text: 'Just pick up the pen and write. Tap <b>Pen</b> again to change colour and thickness, including any colour you like with the rainbow <b>+</b>.', before: toolbarOpen },
+    { target: '.dock [data-tool=pen]', title: 'Write with the pen', text: 'Documents open with the <b>Scroll</b> tool. Tap <b>Pen</b>, then write. Tap <b>Pen</b> a second time to change colour and thickness, including any colour you like with the rainbow <b>+</b>.', before: toolbarOpen },
     { title: 'Move around', text: '<b>Two fingers</b> scroll and pinch-zoom with any tool. Your ink is <b>anchored to the document</b>, so it moves with the page and stays where you put it.<br><br>Tip: run <b>Pen setup</b> on the home screen so a resting hand never draws.' },
-    { target: '.dock [data-tool=highlighter]', title: 'Highlighter', text: 'Highlight words without covering them. Tap it again to pick a colour, width and how see-through it is.', before: toolbarOpen },
+    { target: '.dock [data-tool=highlighter]', title: 'Highlighter', text: 'Highlight words without covering them. Once it is selected, tap it again to pick a colour, width and how see-through it is.', before: toolbarOpen },
     { target: '.dock [data-tool=eraser]', title: 'Eraser', text: 'Rub out <b>part of a line</b> or <b>whole marks</b>. Its options also have <b>Clear this page</b>.', before: toolbarOpen },
     { target: '.dock [data-tool=shape]', title: 'Shapes, text, notes & stamps', text: 'Draw lines, arrows, boxes and circles. Below this are <b>Text</b>, <b>Sticky</b> notes and <b>Stamps</b> (✓ ★ 👍): pick one and tap the page.', before: toolbarOpen },
     { target: '.dock [data-tool=select]', title: 'Select', text: 'Tap a mark (or drag a box around several) to move, resize, copy or delete it.', before: toolbarOpen },

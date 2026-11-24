@@ -61,7 +61,7 @@ export function saveSettings() {
 
 /** Live tool state (shared between toolbar and input handling). */
 export const toolState = {
-  tool: 'pen' as ToolId,
+  tool: 'hand' as ToolId,
   penColor: '#111111',
   penSize: 6, // screen px at the moment of drawing
   hlColor: '#ffeb3b',

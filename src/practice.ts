@@ -25,7 +25,7 @@ export async function practicePdf(): Promise<Uint8Array> {
 
   // page 1
   let p = page('Practice sheet', 'Try each task. Nothing here can break. Undo is on the toolbar.');
-  task(p, 1, 640, 'Pen: circle the word below.', 'Pick up the pen and draw a circle around it.');
+  task(p, 1, 640, 'Pen: circle the word below.', 'Tap Pen on the toolbar, then draw a circle around it.');
   p.drawText('APPLE', { x: 180, y: 540, size: 64, font: bold, color: rgb(0.8, 0.15, 0.15) });
   task(p, 2, 430, 'Highlighter: highlight this sentence.', 'Choose Highlight on the toolbar, then drag across the words.');
   p.drawText('The quick brown fox jumps over the lazy dog.', { x: 180, y: 345, size: 36, font, color: ink });
